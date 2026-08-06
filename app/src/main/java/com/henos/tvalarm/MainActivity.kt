@@ -3,11 +3,15 @@ package com.henos.tvalarm
 import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.text.method.ScrollingMovementMethod
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.work.OneTimeWorkRequestBuilder
@@ -41,6 +45,12 @@ class MainActivity : AppCompatActivity() {
         binding.btnPair.setOnClickListener { doPair() }
         binding.btnSave.setOnClickListener { doSaveAndSchedule() }
         binding.btnRunNow.setOnClickListener { doRunNow() }
+        binding.btnViewLog.setOnClickListener { showDebugLog() }
+        binding.btnViewLog.setOnLongClickListener {
+            DebugLog.clear()
+            toast("Debug log cleared")
+            true
+        }
 
         refreshAllStatuses()
     }
@@ -112,6 +122,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun doPair() {
+        DebugLog.section("USER TAPPED: Pair with TV")
         val ip = currentIp()
         if (ip.isBlank()) {
             toast("Enter the TV's IP address first")
@@ -153,6 +164,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun doSaveAndSchedule() {
+        DebugLog.section("USER TAPPED: Save + Schedule Alarm")
         val ip = currentIp()
         val mac = binding.inputTvMac.text.toString().trim()
         val playlist = binding.inputPlaylistUri.text.toString().trim()
@@ -198,6 +210,7 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetTextI18n")
     private fun doRunNow() {
+        DebugLog.section("USER TAPPED: Run Now")
         val ip = currentIp()
         if (ip.isBlank() || Prefs.clientKey(this) == null) {
             toast("Save your settings and pair with the TV first")
@@ -228,4 +241,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+
+    private fun showDebugLog() {
+        val logText = DebugLog.getLog()
+        val textView = TextView(this).apply {
+            text = logText
+            textSize = 11f
+            setPadding(32, 24, 32, 24)
+            movementMethod = ScrollingMovementMethod()
+            setTextIsSelectable(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Debug Log (long-press button to clear)")
+            .setView(textView)
+            .setPositiveButton("Copy to Clipboard") { _, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("TV Alarm debug log", logText))
+                toast("Copied \u2014 paste it wherever you need to share it")
+            }
+            .setNeutralButton("Share") { _, _ ->
+                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, logText)
+                    putExtra(Intent.EXTRA_SUBJECT, "TV Morning Alarm debug log")
+                }
+                startActivity(Intent.createChooser(sendIntent, "Share debug log"))
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
 }

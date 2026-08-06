@@ -27,8 +27,13 @@ import javax.net.ssl.X509TrustManager
  * Older webOS firmware accepts plain ws:// on port 3000. Many updated
  * firmwares (including older TVs after a software update) only accept
  * wss:// (TLS, self-signed cert) on port 3001. We try both, in order.
+ *
+ * Every step is written to DebugLog so a failure can be diagnosed from
+ * one copy-pasted log instead of trial-and-error screenshots.
  */
 object WebOsClient {
+
+    private const val TAG = "WebOsClient"
 
     /** Human-readable reason for the most recent pairing failure, if any. */
     @Volatile
@@ -45,44 +50,52 @@ object WebOsClient {
     // ---- Wake on LAN --------------------------------------------------
 
     fun sendWol(mac: String) {
-        val macBytes = mac.replace(":", "").replace("-", "")
-            .chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        val bytes = ByteArray(6) { 0xFF.toByte() } + macBytes.copyOf(6).let { m ->
-            ByteArray(16 * 6).also { buf ->
-                for (i in 0 until 16) m.copyInto(buf, i * 6)
+        DebugLog.log(TAG, "sendWol: sending magic packet to MAC=$mac")
+        try {
+            val macBytes = mac.replace(":", "").replace("-", "")
+                .chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+            val bytes = ByteArray(6) { 0xFF.toByte() } + macBytes.copyOf(6).let { m ->
+                ByteArray(16 * 6).also { buf ->
+                    for (i in 0 until 16) m.copyInto(buf, i * 6)
+                }
             }
-        }
-        DatagramSocket().use { socket ->
-            socket.broadcast = true
-            val packet = DatagramPacket(bytes, bytes.size, InetAddress.getByName("255.255.255.255"), 9)
-            socket.send(packet)
+            DatagramSocket().use { socket ->
+                socket.broadcast = true
+                val packet = DatagramPacket(bytes, bytes.size, InetAddress.getByName("255.255.255.255"), 9)
+                socket.send(packet)
+            }
+            DebugLog.log(TAG, "sendWol: packet sent OK")
+        } catch (e: Exception) {
+            DebugLog.log(TAG, "sendWol: FAILED - ${e.javaClass.simpleName}: ${e.message}")
         }
     }
 
     // ---- Reachability ---------------------------------------------------
 
     fun waitForTv(ip: String, timeoutMs: Long): Boolean {
+        DebugLog.log(TAG, "waitForTv: polling $ip ports [3000, 3001] for up to ${timeoutMs}ms")
         val deadline = System.currentTimeMillis() + timeoutMs
+        var attempt = 0
         while (System.currentTimeMillis() < deadline) {
+            attempt++
             for (port in listOf(3000, 3001)) {
                 try {
                     Socket().use { s ->
                         s.connect(java.net.InetSocketAddress(ip, port), 2000)
+                        DebugLog.log(TAG, "waitForTv: attempt $attempt - port $port is OPEN")
                         return true
                     }
                 } catch (e: Exception) {
-                    // try next port / retry
+                    DebugLog.log(TAG, "waitForTv: attempt $attempt - port $port closed/unreachable (${e.javaClass.simpleName}: ${e.message})")
                 }
             }
             Thread.sleep(1500)
         }
+        DebugLog.log(TAG, "waitForTv: TIMED OUT after ${timeoutMs}ms - neither port 3000 nor 3001 opened")
         return false
     }
 
     // ---- TLS client that trusts the TV's self-signed certificate --------
-    // (LG webOS uses a self-signed cert for its local wss:// service; there
-    // is no public CA to validate against, so trust-on-first-use over the
-    // LAN is the standard approach used by webOS remote-control libraries.)
 
     private fun trustAllClient(): OkHttpClient {
         val trustAll = object : X509TrustManager {
@@ -100,8 +113,7 @@ object WebOsClient {
 
     private fun clientFor(secure: Boolean) = if (secure) trustAllClient() else OkHttpClient()
 
-    // ---- Pairing manifest (standard local-pairing manifest used by most
-    // open-source webOS remote-control clients; not a secret) -----------
+    // ---- Pairing manifest -------------------------------------------------
 
     private fun manifest(): JSONObject {
         val permissions = JSONArray(
@@ -151,15 +163,21 @@ object WebOsClient {
 
     /** Blocking. Call from a background thread. Tries ws:// then wss://. Returns the client-key, or null. */
     fun pair(ip: String, onNeedsTvPrompt: () -> Unit): String? {
+        DebugLog.section("PAIR START ip=$ip")
         lastPairError = null
         for (endpoint in endpointsFor(ip)) {
             val result = pairOverEndpoint(endpoint, onNeedsTvPrompt)
-            if (result != null) return result
+            if (result != null) {
+                DebugLog.log(TAG, "pair: SUCCESS via ${endpoint.url}")
+                return result
+            }
         }
+        DebugLog.log(TAG, "pair: FAILED over all endpoints. lastPairError=$lastPairError")
         return null
     }
 
     private fun pairOverEndpoint(endpoint: Endpoint, onNeedsTvPrompt: () -> Unit): String? {
+        DebugLog.log(TAG, "pairOverEndpoint: trying ${endpoint.url}")
         val client = clientFor(endpoint.secure)
         val latch = CountDownLatch(1)
         var result: String? = null
@@ -167,6 +185,7 @@ object WebOsClient {
         val ws = try {
             client.newWebSocket(request, object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    DebugLog.log(TAG, "${endpoint.url}: onOpen (HTTP ${response.code}) - sending register request")
                     val payload = JSONObject().apply {
                         put("forcePairing", false)
                         put("pairingType", "PROMPT")
@@ -182,6 +201,7 @@ object WebOsClient {
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
+                    DebugLog.log(TAG, "${endpoint.url}: received: $text")
                     val resp = JSONObject(text)
                     when (resp.optString("type")) {
                         "registered" -> {
@@ -192,21 +212,33 @@ object WebOsClient {
                             lastPairError = "${endpoint.url}: ${resp.optString("error", resp.toString())}"
                             latch.countDown()
                         }
+                        else -> {
+                            // Some firmwares send an intermediate "response" (e.g. PIN prompt ack)
+                            // before "registered" - keep waiting instead of treating as failure.
+                        }
                     }
                 }
 
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    DebugLog.log(TAG, "${endpoint.url}: onClosed code=$code reason=$reason")
+                }
+
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    lastPairError = "${endpoint.url}: ${t.message ?: t.javaClass.simpleName}"
+                    val httpInfo = if (response != null) " (HTTP ${response.code})" else ""
+                    lastPairError = "${endpoint.url}: ${t.javaClass.simpleName}: ${t.message}$httpInfo"
+                    DebugLog.log(TAG, "${endpoint.url}: onFailure - ${t.javaClass.simpleName}: ${t.message}$httpInfo")
                     latch.countDown()
                 }
             })
         } catch (e: Exception) {
             lastPairError = "${endpoint.url}: ${e.message}"
+            DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
             return null
         }
         val completed = latch.await(20, TimeUnit.SECONDS)
-        if (!completed && lastPairError == null) {
-            lastPairError = "${endpoint.url}: timed out waiting for a response (check the TV screen for a pairing prompt)"
+        if (!completed) {
+            lastPairError = "${endpoint.url}: timed out after 20s waiting for a response (check the TV screen for a pairing prompt you may need to accept)"
+            DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for registered/error response")
         }
         ws.close(1000, null)
         client.dispatcher.executorService.shutdown()
@@ -217,13 +249,19 @@ object WebOsClient {
 
     /** Blocking. Call from a background thread. Returns true on success. */
     fun launchApp(ip: String, clientKey: String, appId: String, contentUri: String): Boolean {
+        DebugLog.section("LAUNCH APP ip=$ip appId=$appId contentUri=$contentUri")
         for (endpoint in endpointsFor(ip)) {
-            if (launchAppOverEndpoint(endpoint, clientKey, appId, contentUri)) return true
+            if (launchAppOverEndpoint(endpoint, clientKey, appId, contentUri)) {
+                DebugLog.log(TAG, "launchApp: SUCCESS via ${endpoint.url}")
+                return true
+            }
         }
+        DebugLog.log(TAG, "launchApp: FAILED over all endpoints")
         return false
     }
 
     private fun launchAppOverEndpoint(endpoint: Endpoint, clientKey: String, appId: String, contentUri: String): Boolean {
+        DebugLog.log(TAG, "launchAppOverEndpoint: trying ${endpoint.url}")
         val client = clientFor(endpoint.secure)
         val latch = CountDownLatch(1)
         var success = false
@@ -233,6 +271,7 @@ object WebOsClient {
                 var registered = false
 
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    DebugLog.log(TAG, "${endpoint.url}: onOpen (HTTP ${response.code})")
                     val payload = JSONObject().apply {
                         put("forcePairing", false)
                         put("pairingType", "PROMPT")
@@ -248,6 +287,7 @@ object WebOsClient {
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
+                    DebugLog.log(TAG, "${endpoint.url}: received: $text")
                     val resp = JSONObject(text)
                     val type = resp.optString("type")
                     if (type == "registered" && !registered) {
@@ -263,6 +303,7 @@ object WebOsClient {
                             put("uri", "ssap://system.launcher/launch")
                             put("payload", launchPayload)
                         }
+                        DebugLog.log(TAG, "${endpoint.url}: registered OK, sending launch request")
                         webSocket.send(launchMsg.toString())
                     } else if (type == "response" || type == "error") {
                         success = type == "response"
@@ -271,30 +312,39 @@ object WebOsClient {
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    DebugLog.log(TAG, "${endpoint.url}: onFailure - ${t.javaClass.simpleName}: ${t.message}")
                     latch.countDown()
                 }
             })
         } catch (e: Exception) {
+            DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
             return false
         }
-        latch.await(20, TimeUnit.SECONDS)
+        val completed = latch.await(20, TimeUnit.SECONDS)
+        if (!completed) DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for launch response")
         ws.close(1000, null)
         client.dispatcher.executorService.shutdown()
         return success
     }
 
-    // ---- MAC address lookup (asks the TV for its own MAC, no OS-level network access needed) ----
+    // ---- MAC address lookup ------------------------------------------------
 
     /** Blocking. Call from a background thread. Returns the TV's active MAC address, or null. */
     fun getMacAddress(ip: String, clientKey: String): String? {
+        DebugLog.section("GET MAC ADDRESS ip=$ip")
         for (endpoint in endpointsFor(ip)) {
             val mac = getMacOverEndpoint(endpoint, clientKey)
-            if (mac != null) return mac
+            if (mac != null) {
+                DebugLog.log(TAG, "getMacAddress: SUCCESS via ${endpoint.url} - mac=$mac")
+                return mac
+            }
         }
+        DebugLog.log(TAG, "getMacAddress: FAILED over all endpoints (couldn't determine MAC)")
         return null
     }
 
     private fun getMacOverEndpoint(endpoint: Endpoint, clientKey: String): String? {
+        DebugLog.log(TAG, "getMacOverEndpoint: trying ${endpoint.url}")
         val client = clientFor(endpoint.secure)
         val latch = CountDownLatch(1)
         var result: String? = null
@@ -319,6 +369,7 @@ object WebOsClient {
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
+                    DebugLog.log(TAG, "${endpoint.url}: received: $text")
                     val resp = JSONObject(text)
                     val type = resp.optString("type")
                     if (type == "registered" && !registered) {
@@ -344,6 +395,9 @@ object WebOsClient {
                                 wired != null && wired.has("macAddress") -> wired.getString("macAddress")
                                 else -> null
                             }
+                            if (result == null) {
+                                DebugLog.log(TAG, "${endpoint.url}: getStatus response had no macAddress field in wifi/wired")
+                            }
                         }
                         latch.countDown()
                     } else if (type == "error") {
@@ -352,13 +406,16 @@ object WebOsClient {
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    DebugLog.log(TAG, "${endpoint.url}: onFailure - ${t.javaClass.simpleName}: ${t.message}")
                     latch.countDown()
                 }
             })
         } catch (e: Exception) {
+            DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
             return null
         }
-        latch.await(15, TimeUnit.SECONDS)
+        val completed = latch.await(15, TimeUnit.SECONDS)
+        if (!completed) DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for getStatus response")
         ws.close(1000, null)
         client.dispatcher.executorService.shutdown()
         return result
