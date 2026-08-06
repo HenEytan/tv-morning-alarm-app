@@ -58,6 +58,11 @@ class MainActivity : AppCompatActivity() {
         else
             "Not paired yet"
 
+        val pairError = WebOsClient.lastPairError
+        if (Prefs.clientKey(this) == null && pairError != null) {
+            binding.statusPair.text = "\u2717 $pairError"
+        }
+
         if (Prefs.isScheduled(this)) {
             val h = Prefs.alarmHour(this)
             val m = Prefs.alarmMinute(this)
@@ -141,7 +146,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 runOnUiThread {
                     binding.btnPair.isEnabled = true
-                    toast("Pairing failed or timed out \u2014 try again")
+                    toast("Pairing failed: ${WebOsClient.lastPairError ?: "unknown error"}")
                 }
             }
         }
