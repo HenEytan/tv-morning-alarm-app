@@ -67,25 +67,45 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
+        <TextView
+            android:id="@+id/statusPair"
+            android:text="Not paired yet"
+            android:textSize="13sp"
+            android:layout_marginTop="4dp"
+            android:layout_marginStart="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
         <Button
             android:id="@+id/btnSave"
             android:text="2. Save + Schedule Alarm"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="12dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:id="@+id/statusSchedule"
+            android:text="Not scheduled yet"
+            android:textSize="13sp"
+            android:layout_marginTop="4dp"
+            android:layout_marginStart="4dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
         <Button
             android:id="@+id/btnRunNow"
             android:text="Run Now (test)"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="12dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
         <TextView
-            android:id="@+id/statusText"
-            android:text=""
-            android:layout_marginTop="16dp"
+            android:id="@+id/statusRun"
+            android:text="Not run yet"
             android:textSize="13sp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="16dp"
+            android:layout_marginStart="4dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 

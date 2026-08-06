@@ -189,4 +189,71 @@ object WebOsClient {
         client.dispatcher.executorService.shutdown()
         return success
     }
+
+    /** Blocking. Call from a background thread. Returns the TV's active MAC address, or null. */
+    fun getMacAddress(ip: String, clientKey: String): String? {
+        val client = OkHttpClient()
+        val latch = CountDownLatch(1)
+        var result: String? = null
+        val request = Request.Builder().url("ws://$ip:$SSAP_PORT").build()
+        val ws = client.newWebSocket(request, object : WebSocketListener() {
+            var registered = false
+
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                val payload = JSONObject().apply {
+                    put("forcePairing", false)
+                    put("pairingType", "PROMPT")
+                    put("manifest", manifest())
+                    put("client-key", clientKey)
+                }
+                val msg = JSONObject().apply {
+                    put("type", "register")
+                    put("id", UUID.randomUUID().toString())
+                    put("payload", payload)
+                }
+                webSocket.send(msg.toString())
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val resp = JSONObject(text)
+                val type = resp.optString("type")
+                if (type == "registered" && !registered) {
+                    registered = true
+                    val statusMsg = JSONObject().apply {
+                        put("type", "request")
+                        put("id", UUID.randomUUID().toString())
+                        put("uri", "ssap://com.webos.service.connectionmanager/getStatus")
+                        put("payload", JSONObject())
+                    }
+                    webSocket.send(statusMsg.toString())
+                } else if (type == "response") {
+                    val payload = resp.optJSONObject("payload")
+                    if (payload != null) {
+                        val wifi = payload.optJSONObject("wifi")
+                        val wired = payload.optJSONObject("wired")
+                        result = when {
+                            wifi != null && wifi.optString("state") == "connected" && wifi.has("macAddress") ->
+                                wifi.getString("macAddress")
+                            wired != null && wired.optString("state") == "connected" && wired.has("macAddress") ->
+                                wired.getString("macAddress")
+                            wifi != null && wifi.has("macAddress") -> wifi.getString("macAddress")
+                            wired != null && wired.has("macAddress") -> wired.getString("macAddress")
+                            else -> null
+                        }
+                    }
+                    latch.countDown()
+                } else if (type == "error") {
+                    latch.countDown()
+                }
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                latch.countDown()
+            }
+        })
+        latch.await(15, TimeUnit.SECONDS)
+        ws.close(1000, null)
+        client.dispatcher.executorService.shutdown()
+        return result
+    }
 }

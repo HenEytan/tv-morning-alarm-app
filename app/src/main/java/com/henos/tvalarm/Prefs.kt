@@ -15,6 +15,12 @@ object Prefs {
     fun alarmHour(context: Context) = get(context).getInt("alarm_hour", 7)
     fun alarmMinute(context: Context) = get(context).getInt("alarm_minute", 0)
 
+    fun pairedAt(context: Context) = get(context).getLong("paired_at", 0L)
+    fun scheduledAt(context: Context) = get(context).getLong("scheduled_at", 0L)
+    fun isScheduled(context: Context) = get(context).getBoolean("is_scheduled", false)
+    fun lastRunAt(context: Context) = get(context).getLong("last_run_at", 0L)
+    fun lastRunStatus(context: Context) = get(context).getString("last_run_status", null)
+
     fun save(
         context: Context,
         tvIp: String,
@@ -35,6 +41,23 @@ object Prefs {
     }
 
     fun saveClientKey(context: Context, key: String) {
-        get(context).edit().putString("client_key", key).apply()
+        get(context).edit()
+            .putString("client_key", key)
+            .putLong("paired_at", System.currentTimeMillis())
+            .apply()
+    }
+
+    fun markScheduled(context: Context) {
+        get(context).edit()
+            .putBoolean("is_scheduled", true)
+            .putLong("scheduled_at", System.currentTimeMillis())
+            .apply()
+    }
+
+    fun markRunResult(context: Context, status: String) {
+        get(context).edit()
+            .putLong("last_run_at", System.currentTimeMillis())
+            .putString("last_run_status", status)
+            .apply()
     }
 }
