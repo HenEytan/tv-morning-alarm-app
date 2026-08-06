@@ -2,6 +2,7 @@ package com.henos.tvalarm
 
 import android.annotation.SuppressLint
 import android.app.AlarmManager
+import android.app.AlertDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -31,9 +32,44 @@ class MainActivity : AppCompatActivity() {
         binding.timePicker.hour = Prefs.alarmHour(this)
         binding.timePicker.minute = Prefs.alarmMinute(this)
 
+        binding.btnScan.setOnClickListener { doScan() }
         binding.btnPair.setOnClickListener { doPair() }
         binding.btnSave.setOnClickListener { doSaveAndSchedule() }
         binding.btnRunNow.setOnClickListener { doRunNow() }
+    }
+
+    private fun doScan() {
+        toast("Scanning network for TVs...")
+        binding.btnScan.isEnabled = false
+        thread {
+            val devices = try {
+                SsdpDiscovery.discover(this)
+            } catch (e: Exception) {
+                emptyList()
+            }
+            runOnUiThread {
+                binding.btnScan.isEnabled = true
+                if (devices.isEmpty()) {
+                    toast("No TVs found — make sure the TV is on and on the same network")
+                    return@runOnUiThread
+                }
+                val labels = devices.map { "${it.name}  (${it.ip})" }.toTypedArray()
+                AlertDialog.Builder(this)
+                    .setTitle("Select your TV")
+                    .setItems(labels) { _, which ->
+                        val picked = devices[which]
+                        binding.inputTvIp.setText(picked.ip)
+                        val mac = ArpUtil.lookupMac(picked.ip)
+                        if (mac != null) {
+                            binding.inputTvMac.setText(mac)
+                            toast("Filled in IP and MAC for ${picked.name}")
+                        } else {
+                            toast("Filled in IP for ${picked.name} — MAC address couldn't be auto-detected, enter it manually")
+                        }
+                    }
+                    .show()
+            }
+        }
     }
 
     private fun currentIp() = binding.inputTvIp.text.toString().trim()
