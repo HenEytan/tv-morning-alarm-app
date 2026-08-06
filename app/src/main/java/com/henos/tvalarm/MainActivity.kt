@@ -6,6 +6,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -128,6 +129,20 @@ class MainActivity : AppCompatActivity() {
         AlarmScheduler.scheduleNext(this)
         binding.statusText.text = "Scheduled daily at %02d:%02d".format(hour, minute)
         toast("Alarm scheduled")
+        requestIgnoreBatteryOptimizations()
+    }
+
+    /** Asks the OS not to kill this app in the background, so the scheduled alarm keeps firing reliably. */
+    private fun requestIgnoreBatteryOptimizations() {
+        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
+                )
+            } catch (e: Exception) {
+            }
+        }
     }
 
     private fun doRunNow() {
