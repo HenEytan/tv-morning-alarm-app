@@ -17,13 +17,17 @@ class TvAlarmWorker(context: Context, params: WorkerParameters) : Worker(context
 
         DebugLog.log("TvAlarmWorker", "config: ip=$ip mac=$mac appId=$appId playlist=$playlist hasClientKey=${clientKey != null}")
 
-        if (ip.isBlank() || mac.isBlank() || playlist.isBlank() || clientKey == null) {
+        if (ip.isBlank() || playlist.isBlank() || clientKey == null) {
             DebugLog.log("TvAlarmWorker", "ABORT: missing required config")
             Prefs.markRunResult(ctx, "failed")
             return Result.failure()
         }
 
-        WebOsClient.sendWol(mac)
+        if (mac.isNotBlank()) {
+            WebOsClient.sendWol(mac)
+        } else {
+            DebugLog.log("TvAlarmWorker", "no MAC configured - skipping Wake-on-LAN (only works if the TV is already on)")
+        }
 
         if (!WebOsClient.waitForTv(ip, timeoutMs = 90_000)) {
             DebugLog.log("TvAlarmWorker", "ABORT: TV never came online after WOL")
