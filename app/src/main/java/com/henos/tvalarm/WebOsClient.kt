@@ -113,7 +113,7 @@ object WebOsClient {
 
     private fun clientFor(secure: Boolean) = if (secure) trustAllClient() else OkHttpClient()
 
-    // ---- Device identity --------------------------------------------------
+    // ---- Device identity -----------------------------------------------
     // A unique-per-install serial, instead of the widely-shared public test
     // serial many hobbyist webOS projects use. If the TV has any stale/stuck
     // pairing record tied to a previously-seen appId+serial pair, reusing
