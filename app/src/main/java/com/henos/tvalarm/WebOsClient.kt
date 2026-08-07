@@ -113,6 +113,23 @@ object WebOsClient {
 
     private fun clientFor(secure: Boolean) = if (secure) trustAllClient() else OkHttpClient()
 
+    // ---- Device identity --------------------------------------------------
+    // A unique-per-install serial, instead of the widely-shared public test
+    // serial many hobbyist webOS projects use. If the TV has any stale/stuck
+    // pairing record tied to a previously-seen appId+serial pair, reusing
+    // that shared value can cause the TV to silently accept the socket
+    // handshake without ever rendering the on-screen prompt. Generated once
+    // and persisted so an already-accepted pairing keeps working.
+    private fun deviceSerial(): String {
+        val ctx = DebugLog.appContext
+        val prefs = ctx?.getSharedPreferences("tvalarm_identity", android.content.Context.MODE_PRIVATE)
+        val existing = prefs?.getString("serial", null)
+        if (existing != null) return existing
+        val fresh = UUID.randomUUID().toString().replace("-", "")
+        prefs?.edit()?.putString("serial", fresh)?.apply()
+        return fresh
+    }
+
     // ---- Pairing manifest -------------------------------------------------
 
     private fun manifest(): JSONObject {
@@ -134,7 +151,7 @@ object WebOsClient {
             put("vendorId", "com.henos")
             put("localizedAppNames", JSONObject().put("", "TV Morning Alarm"))
             put("permissions", permissions)
-            put("serial", "2f930e2d2cfe083771f68e4fe7bb07")
+            put("serial", deviceSerial())
         }
         val signature = JSONObject().apply {
             put("signatureVersion", 1)
@@ -197,7 +214,6 @@ object WebOsClient {
                         put("payload", payload)
                     }
                     webSocket.send(msg.toString())
-                    onNeedsTvPrompt()
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -212,9 +228,14 @@ object WebOsClient {
                             lastPairError = "${endpoint.url}: ${resp.optString("error", resp.toString())}"
                             latch.countDown()
                         }
+                        "response" -> {
+                            // The TV acknowledged the register request and (should be) showing
+                            // the on-screen accept prompt now. The final "registered" message
+                            // only arrives after the user taps Accept on the TV.
+                            onNeedsTvPrompt()
+                        }
                         else -> {
-                            // Some firmwares send an intermediate "response" (e.g. PIN prompt ack)
-                            // before "registered" - keep waiting instead of treating as failure.
+                            // Unrecognized intermediate message - keep waiting.
                         }
                     }
                 }
@@ -235,9 +256,9 @@ object WebOsClient {
             DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
             return null
         }
-        val completed = latch.await(20, TimeUnit.SECONDS)
+        val completed = latch.await(90, TimeUnit.SECONDS)
         if (!completed) {
-            lastPairError = "${endpoint.url}: timed out after 20s waiting for a response (check the TV screen for a pairing prompt you may need to accept)"
+            lastPairError = "${endpoint.url}: timed out after 90s \u2014 the TV never sent a final response. If no prompt appeared on screen at all, check the TV for an \"LG Connect Apps\" / \"Mobile TV On\" style setting, or a list of paired/blocked devices that may need clearing."
             DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for registered/error response")
         }
         ws.close(1000, null)
