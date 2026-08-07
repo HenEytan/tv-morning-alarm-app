@@ -45,6 +45,48 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetTextI18n")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            setupUi()
+        } catch (t: Throwable) {
+            showCrashScreen(t)
+        }
+    }
+
+    /** Renders a scrollable, copyable screen showing exactly what crashed, instead of force-closing. */
+    private fun showCrashScreen(t: Throwable) {
+        val sw = java.io.StringWriter()
+        t.printStackTrace(java.io.PrintWriter(sw))
+        val trace = sw.toString()
+        try {
+            DebugLog.section("STARTUP CRASH")
+            DebugLog.log("MainActivity", trace)
+        } catch (ignored: Throwable) {
+            // Even logging must not be allowed to crash the fallback screen.
+        }
+        val textView = TextView(this).apply {
+            text = "The app failed to start. Copy this and send it back:\n\n$trace"
+            textSize = 12f
+            setPadding(32, 48, 32, 48)
+            setTextIsSelectable(true)
+            movementMethod = ScrollingMovementMethod()
+        }
+        val copyButton = android.widget.Button(this).apply {
+            text = "Copy error to clipboard"
+            setOnClickListener {
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("TV Alarm crash", trace))
+                Toast.makeText(this@MainActivity, "Copied", Toast.LENGTH_SHORT).show()
+            }
+        }
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            addView(copyButton)
+            addView(textView)
+        }
+        setContentView(android.widget.ScrollView(this).apply { addView(container) })
+    }
+
+    private fun setupUi() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -77,7 +119,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        refreshAllStatuses()
+        if (::binding.isInitialized) refreshAllStatuses()
     }
 
     private fun currentDaysMask(): Int {
