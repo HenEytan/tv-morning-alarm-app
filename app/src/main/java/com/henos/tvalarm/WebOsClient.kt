@@ -113,7 +113,7 @@ object WebOsClient {
 
     private fun clientFor(secure: Boolean) = if (secure) trustAllClient() else OkHttpClient()
 
-    // ---- Device identity -----------------------------------------------
+    // ---- Device identity --------------------------------------------------
     // A unique-per-install serial, instead of the widely-shared public test
     // serial many hobbyist webOS projects use. If the TV has any stale/stuck
     // pairing record tied to a previously-seen appId+serial pair, reusing
@@ -369,6 +369,16 @@ object WebOsClient {
         val client = clientFor(endpoint.secure)
         val latch = CountDownLatch(1)
         var result: String? = null
+        // Older webOS firmware (pre-~webOS 3.x unification) only exposes the
+        // legacy "system.connectionmanager" namespace; newer firmware uses
+        // "com.webos.service.connectionmanager". Try legacy first (matches
+        // the "system.launcher/launch" naming this TV already confirmed
+        // working for app-launch), then fall back to the modern name.
+        val uris = listOf(
+            "ssap://system.connectionmanager/getStatus",
+            "ssap://com.webos.service.connectionmanager/getStatus"
+        )
+        var uriIndex = 0
         val request = Request.Builder().url(endpoint.url).build()
         val ws = try {
             client.newWebSocket(request, object : WebSocketListener() {
@@ -389,19 +399,24 @@ object WebOsClient {
                     webSocket.send(msg.toString())
                 }
 
+                private fun sendStatusRequest(webSocket: WebSocket) {
+                    val statusMsg = JSONObject().apply {
+                        put("type", "request")
+                        put("id", UUID.randomUUID().toString())
+                        put("uri", uris[uriIndex])
+                        put("payload", JSONObject())
+                    }
+                    DebugLog.log(TAG, "${endpoint.url}: trying MAC lookup via ${uris[uriIndex]}")
+                    webSocket.send(statusMsg.toString())
+                }
+
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     DebugLog.log(TAG, "${endpoint.url}: received: $text")
                     val resp = JSONObject(text)
                     val type = resp.optString("type")
                     if (type == "registered" && !registered) {
                         registered = true
-                        val statusMsg = JSONObject().apply {
-                            put("type", "request")
-                            put("id", UUID.randomUUID().toString())
-                            put("uri", "ssap://com.webos.service.connectionmanager/getStatus")
-                            put("payload", JSONObject())
-                        }
-                        webSocket.send(statusMsg.toString())
+                        sendStatusRequest(webSocket)
                     } else if (type == "response") {
                         val payload = resp.optJSONObject("payload")
                         if (payload != null) {
@@ -417,12 +432,17 @@ object WebOsClient {
                                 else -> null
                             }
                             if (result == null) {
-                                DebugLog.log(TAG, "${endpoint.url}: getStatus response had no macAddress field in wifi/wired")
+                                DebugLog.log(TAG, "${endpoint.url}: ${uris[uriIndex]} response had no macAddress field in wifi/wired")
                             }
                         }
                         latch.countDown()
                     } else if (type == "error") {
-                        latch.countDown()
+                        if (uriIndex < uris.size - 1) {
+                            uriIndex++
+                            sendStatusRequest(webSocket)
+                        } else {
+                            latch.countDown()
+                        }
                     }
                 }
 
