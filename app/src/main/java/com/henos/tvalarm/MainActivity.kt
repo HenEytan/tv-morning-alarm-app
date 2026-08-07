@@ -61,7 +61,6 @@ class MainActivity : AppCompatActivity() {
             DebugLog.section("STARTUP CRASH")
             DebugLog.log("MainActivity", trace)
         } catch (ignored: Throwable) {
-            // Even logging must not be allowed to crash the fallback screen.
         }
         val textView = TextView(this).apply {
             text = "The app failed to start. Copy this and send it back:\n\n$trace"
@@ -245,11 +244,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Accepts either a proper Spotify URI (spotify:playlist:ID) or a web share
+     * link (https://open.spotify.com/playlist/ID?...) and returns the compact
+     * URI form the TV's Spotify app needs to launch directly to that playlist.
+     * Anything else is returned unchanged.
+     */
+    private fun normalizePlaylistUri(input: String): String {
+        val trimmed = input.trim()
+        if (trimmed.startsWith("spotify:")) return trimmed
+        val match = Regex("open\\.spotify\\.com/playlist/([A-Za-z0-9]+)").find(trimmed)
+        return if (match != null) "spotify:playlist:${match.groupValues[1]}" else trimmed
+    }
+
     private fun doSaveAndSchedule() {
         DebugLog.section("USER TAPPED: Save + Schedule Alarm")
         val ip = currentIp()
         val mac = binding.inputTvMac.text.toString().trim()
-        val playlist = binding.inputPlaylistUri.text.toString().trim()
+        val playlist = normalizePlaylistUri(binding.inputPlaylistUri.text.toString())
+        binding.inputPlaylistUri.setText(playlist)
         val appId = binding.inputSpotifyAppId.text.toString().trim().ifBlank { "spotify-beehive" }
         val hour = binding.timePicker.hour
         val minute = binding.timePicker.minute
@@ -303,11 +316,13 @@ class MainActivity : AppCompatActivity() {
             toast("Save your settings and pair with the TV first")
             return
         }
+        val playlist = normalizePlaylistUri(binding.inputPlaylistUri.text.toString())
+        binding.inputPlaylistUri.setText(playlist)
         Prefs.save(
             this,
             ip,
             binding.inputTvMac.text.toString().trim(),
-            binding.inputPlaylistUri.text.toString().trim(),
+            playlist,
             binding.inputSpotifyAppId.text.toString().trim().ifBlank { "spotify-beehive" },
             binding.timePicker.hour,
             binding.timePicker.minute,
