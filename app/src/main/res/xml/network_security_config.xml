@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- LG webOS TV control is local-LAN-only cleartext WebSocket (ws://) on
+         port 3000. Android blocks cleartext traffic by default; this is a
+         local-network control app so we explicitly allow it. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
