@@ -30,6 +30,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
 
+        <!-- Connection card -->
         <com.google.android.material.card.MaterialCardView style="@style/CardSection">
             <LinearLayout
                 android:orientation="vertical"
@@ -54,6 +55,7 @@
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/inputTvIp"
                         android:inputType="text"
+                        android:importantForAutofill="no"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
                 </com.google.android.material.textfield.TextInputLayout>
@@ -66,6 +68,7 @@
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/inputTvMac"
                         android:inputType="text"
+                        android:importantForAutofill="no"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
                 </com.google.android.material.textfield.TextInputLayout>
@@ -87,6 +90,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Playlist card -->
         <com.google.android.material.card.MaterialCardView style="@style/CardSection">
             <LinearLayout
                 android:orientation="vertical"
@@ -104,6 +108,7 @@
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/inputPlaylistUri"
                         android:inputType="text"
+                        android:importantForAutofill="no"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
                 </com.google.android.material.textfield.TextInputLayout>
@@ -117,6 +122,7 @@
                         android:id="@+id/inputSpotifyAppId"
                         android:text="spotify-beehive"
                         android:inputType="text"
+                        android:importantForAutofill="no"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
                 </com.google.android.material.textfield.TextInputLayout>
@@ -124,6 +130,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Schedule card -->
         <com.google.android.material.card.MaterialCardView style="@style/CardSection">
             <LinearLayout
                 android:orientation="vertical"
@@ -188,6 +195,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Test card -->
         <com.google.android.material.card.MaterialCardView style="@style/CardSection">
             <LinearLayout
                 android:orientation="vertical"
