@@ -11,6 +11,8 @@
     </style>
 
     <style name="CardSection" parent="Widget.MaterialComponents.CardView">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
         <item name="cardCornerRadius">16dp</item>
         <item name="cardElevation">2dp</item>
         <item name="cardBackgroundColor">@color/surface_card</item>
@@ -19,6 +21,8 @@
     </style>
 
     <style name="SectionTitle">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
         <item name="android:textSize">14sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textAllCaps">true</item>
@@ -62,6 +66,8 @@
     </style>
 
     <style name="DayChip" parent="Widget.MaterialComponents.Chip.Choice">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
         <item name="chipBackgroundColor">@color/chip_background_selector</item>
         <item name="android:textColor">@color/chip_text_selector</item>
         <item name="checkedIconVisible">false</item>
