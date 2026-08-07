@@ -16,8 +16,10 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.google.android.material.chip.Chip
 import com.henos.tvalarm.databinding.ActivityMainBinding
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.concurrent.thread
@@ -26,6 +28,19 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val timeFmt = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
+
+    /** Maps each day chip to its java.util.Calendar.DAY_OF_WEEK constant. */
+    private val dayChips: List<Pair<Chip, Int>> by lazy {
+        listOf(
+            binding.chipSun to Calendar.SUNDAY,
+            binding.chipMon to Calendar.MONDAY,
+            binding.chipTue to Calendar.TUESDAY,
+            binding.chipWed to Calendar.WEDNESDAY,
+            binding.chipThu to Calendar.THURSDAY,
+            binding.chipFri to Calendar.FRIDAY,
+            binding.chipSat to Calendar.SATURDAY,
+        )
+    }
 
     @SuppressLint("SetTextI18n")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,6 +55,11 @@ class MainActivity : AppCompatActivity() {
         binding.timePicker.setIs24HourView(true)
         binding.timePicker.hour = Prefs.alarmHour(this)
         binding.timePicker.minute = Prefs.alarmMinute(this)
+
+        val savedMask = Prefs.alarmDaysMask(this)
+        dayChips.forEach { (chip, dayOfWeek) ->
+            chip.isChecked = (savedMask and (1 shl (dayOfWeek - Calendar.SUNDAY))) != 0
+        }
 
         binding.btnScan.setOnClickListener { doScan() }
         binding.btnPair.setOnClickListener { doPair() }
@@ -60,6 +80,25 @@ class MainActivity : AppCompatActivity() {
         refreshAllStatuses()
     }
 
+    private fun currentDaysMask(): Int {
+        var mask = 0
+        dayChips.forEach { (chip, dayOfWeek) ->
+            if (chip.isChecked) mask = mask or (1 shl (dayOfWeek - Calendar.SUNDAY))
+        }
+        return mask
+    }
+
+    private fun formatDaysMask(mask: Int): String {
+        if (mask == Prefs.ALL_DAYS_MASK) return "every day"
+        if (mask == 0) return "no days selected"
+        val weekdays = (1 shl (Calendar.MONDAY - Calendar.SUNDAY)) or (1 shl (Calendar.TUESDAY - Calendar.SUNDAY)) or
+            (1 shl (Calendar.WEDNESDAY - Calendar.SUNDAY)) or (1 shl (Calendar.THURSDAY - Calendar.SUNDAY)) or
+            (1 shl (Calendar.FRIDAY - Calendar.SUNDAY))
+        if (mask == weekdays) return "weekdays"
+        val names = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+        return names.filterIndexed { i, _ -> (mask and (1 shl i)) != 0 }.joinToString(", ")
+    }
+
     @SuppressLint("SetTextI18n")
     private fun refreshAllStatuses() {
         val pairedAt = Prefs.pairedAt(this)
@@ -76,7 +115,8 @@ class MainActivity : AppCompatActivity() {
         if (Prefs.isScheduled(this)) {
             val h = Prefs.alarmHour(this)
             val m = Prefs.alarmMinute(this)
-            binding.statusSchedule.text = "\u2713 Scheduled daily at %02d:%02d".format(h, m)
+            val days = formatDaysMask(Prefs.alarmDaysMask(this))
+            binding.statusSchedule.text = "\u2713 Scheduled at %02d:%02d \u2014 $days".format(h, m)
         } else {
             binding.statusSchedule.text = "Not scheduled yet"
         }
@@ -171,6 +211,7 @@ class MainActivity : AppCompatActivity() {
         val appId = binding.inputSpotifyAppId.text.toString().trim().ifBlank { "spotify-beehive" }
         val hour = binding.timePicker.hour
         val minute = binding.timePicker.minute
+        val daysMask = currentDaysMask()
 
         if (ip.isBlank() || mac.isBlank() || playlist.isBlank()) {
             toast("Fill in TV IP, MAC, and playlist URI")
@@ -180,8 +221,12 @@ class MainActivity : AppCompatActivity() {
             toast("Pair with the TV first (step 1)")
             return
         }
+        if (daysMask == 0) {
+            toast("Select at least one day")
+            return
+        }
 
-        Prefs.save(this, ip, mac, playlist, appId, hour, minute)
+        Prefs.save(this, ip, mac, playlist, appId, hour, minute, daysMask)
 
         if (!AlarmScheduler.canScheduleExact(this)) {
             toast("Grant \"Alarms & reminders\" permission, then tap Save again")
@@ -223,7 +268,8 @@ class MainActivity : AppCompatActivity() {
             binding.inputPlaylistUri.text.toString().trim(),
             binding.inputSpotifyAppId.text.toString().trim().ifBlank { "spotify-beehive" },
             binding.timePicker.hour,
-            binding.timePicker.minute
+            binding.timePicker.minute,
+            currentDaysMask()
         )
         binding.statusRun.text = "Running\u2026"
         binding.btnRunNow.isEnabled = false
