@@ -1,126 +1,227 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.core.widget.NestedScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@color/surface_background">
 
     <LinearLayout
         android:orientation="vertical"
-        android:padding="24dp"
+        android:padding="16dp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
         <TextView
             android:text="TV Morning Alarm"
-            android:textSize="22sp"
+            android:textSize="24sp"
             android:textStyle="bold"
-            android:layout_marginBottom="16dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-
-        <Button
-            android:id="@+id/btnScan"
-            android:text="Scan for TVs on network"
-            android:layout_marginBottom="8dp"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <EditText
-            android:id="@+id/inputTvIp"
-            android:hint="TV IP address (e.g. 192.168.1.50)"
-            android:inputType="text"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <EditText
-            android:id="@+id/inputTvMac"
-            android:hint="TV MAC address (AA:BB:CC:DD:EE:FF)"
-            android:inputType="text"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <EditText
-            android:id="@+id/inputPlaylistUri"
-            android:hint="Spotify playlist URI (spotify:playlist:...)"
-            android:inputType="text"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <EditText
-            android:id="@+id/inputSpotifyAppId"
-            android:hint="Spotify app id on TV"
-            android:text="spotify-beehive"
-            android:inputType="text"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TimePicker
-            android:id="@+id/timePicker"
-            android:timePickerMode="spinner"
-            android:layout_marginTop="16dp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-
-        <Button
-            android:id="@+id/btnPair"
-            android:text="1. Pair with TV"
-            android:layout_marginTop="16dp"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            android:id="@+id/statusPair"
-            android:text="Not paired yet"
-            android:textSize="13sp"
-            android:layout_marginTop="4dp"
-            android:layout_marginStart="4dp"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <Button
-            android:id="@+id/btnSave"
-            android:text="2. Save + Schedule Alarm"
-            android:layout_marginTop="12dp"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            android:id="@+id/statusSchedule"
-            android:text="Not scheduled yet"
-            android:textSize="13sp"
-            android:layout_marginTop="4dp"
-            android:layout_marginStart="4dp"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <Button
-            android:id="@+id/btnRunNow"
-            android:text="Run Now (test)"
-            android:layout_marginTop="12dp"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            android:id="@+id/statusRun"
-            android:text="Not run yet"
-            android:textSize="13sp"
-            android:layout_marginTop="4dp"
-            android:layout_marginBottom="16dp"
-            android:layout_marginStart="4dp"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <View
+            android:textColor="@color/text_primary"
             android:layout_marginTop="8dp"
-            android:layout_marginBottom="8dp"
-            android:background="#DDDDDD"
-            android:layout_width="match_parent"
-            android:layout_height="1dp" />
+            android:layout_marginBottom="2dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
 
-        <Button
+        <TextView
+            android:text="Wakes your LG TV and starts Spotify, on a schedule you set"
+            android:textSize="13sp"
+            android:textColor="@color/text_secondary"
+            android:layout_marginBottom="20dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+
+        <com.google.android.material.card.MaterialCardView style="@style/CardSection">
+            <LinearLayout
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <TextView android:text="1 \u00b7 Connect to your TV" style="@style/SectionTitle" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnScan"
+                    android:text="Scan for TVs on network"
+                    style="@style/OutlinedActionButton"
+                    android:layout_marginTop="0dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/OutlinedField"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="TV IP address">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/inputTvIp"
+                        android:inputType="text"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/OutlinedField"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="TV MAC address">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/inputTvMac"
+                        android:inputType="text"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnPair"
+                    android:text="Pair with TV"
+                    style="@style/PrimaryActionButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:id="@+id/statusPair"
+                    android:text="Not paired yet"
+                    style="@style/StatusLine"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView style="@style/CardSection">
+            <LinearLayout
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <TextView android:text="2 \u00b7 Morning playlist" style="@style/SectionTitle" />
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/OutlinedField"
+                    android:layout_marginTop="0dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Spotify playlist URI">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/inputPlaylistUri"
+                        android:inputType="text"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/OutlinedField"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Spotify app id on TV">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/inputSpotifyAppId"
+                        android:text="spotify-beehive"
+                        android:inputType="text"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView style="@style/CardSection">
+            <LinearLayout
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <TextView android:text="3 \u00b7 Schedule" style="@style/SectionTitle" />
+
+                <TimePicker
+                    android:id="@+id/timePicker"
+                    android:timePickerMode="spinner"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal" />
+
+                <TextView
+                    android:text="Repeat on"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="6dp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/dayChipGroup"
+                    app:singleSelection="false"
+                    app:chipSpacingHorizontal="4dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipSun" android:text="Su" android:checkable="true" android:checked="true" style="@style/DayChip" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipMon" android:text="Mo" android:checkable="true" android:checked="true" style="@style/DayChip" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipTue" android:text="Tu" android:checkable="true" android:checked="true" style="@style/DayChip" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipWed" android:text="We" android:checkable="true" android:checked="true" style="@style/DayChip" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipThu" android:text="Th" android:checkable="true" android:checked="true" style="@style/DayChip" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipFri" android:text="Fr" android:checkable="true" android:checked="true" style="@style/DayChip" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipSat" android:text="Sa" android:checkable="true" android:checked="true" style="@style/DayChip" />
+                </com.google.android.material.chip.ChipGroup>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSave"
+                    android:text="Save + Schedule Alarm"
+                    style="@style/PrimaryActionButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:id="@+id/statusSchedule"
+                    android:text="Not scheduled yet"
+                    style="@style/StatusLine"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView style="@style/CardSection">
+            <LinearLayout
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <TextView android:text="Test it now" style="@style/SectionTitle" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnRunNow"
+                    android:text="Run Now"
+                    style="@style/OutlinedActionButton"
+                    android:layout_marginTop="0dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:id="@+id/statusRun"
+                    android:text="Not run yet"
+                    style="@style/StatusLine"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnViewLog"
             android:text="View Debug Log"
-            android:layout_width="match_parent"
+            style="@style/TextButtonMuted"
+            android:layout_marginBottom="16dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
 
     </LinearLayout>
-</ScrollView>
+</androidx.core.widget.NestedScrollView>
