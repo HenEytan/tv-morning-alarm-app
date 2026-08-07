@@ -61,6 +61,7 @@ class MainActivity : AppCompatActivity() {
             DebugLog.section("STARTUP CRASH")
             DebugLog.log("MainActivity", trace)
         } catch (ignored: Throwable) {
+            // Even logging must not be allowed to crash the fallback screen.
         }
         val textView = TextView(this).apply {
             text = "The app failed to start. Copy this and send it back:\n\n$trace"
@@ -224,6 +225,8 @@ class MainActivity : AppCompatActivity() {
             }
             if (key != null) {
                 Prefs.saveClientKey(this, key)
+                // Ask the TV for its own MAC address (works regardless of Android's
+                // network-privacy restrictions, since we ask the TV, not the OS).
                 val mac = WebOsClient.getMacAddress(ip, key)
                 runOnUiThread {
                     binding.btnPair.isEnabled = true
@@ -257,6 +260,10 @@ class MainActivity : AppCompatActivity() {
         return if (match != null) "spotify:playlist:${match.groupValues[1]}" else trimmed
     }
 
+    /** Accepts 12 hex digits, with or without : or - separators every 2 chars. */
+    private fun isValidMac(mac: String): Boolean =
+        Regex("^([0-9A-Fa-f]{2}[:-]?){5}[0-9A-Fa-f]{2}$").matches(mac)
+
     private fun doSaveAndSchedule() {
         DebugLog.section("USER TAPPED: Save + Schedule Alarm")
         val ip = currentIp()
@@ -268,8 +275,12 @@ class MainActivity : AppCompatActivity() {
         val minute = binding.timePicker.minute
         val daysMask = currentDaysMask()
 
-        if (ip.isBlank() || mac.isBlank() || playlist.isBlank()) {
-            toast("Fill in TV IP, MAC, and playlist URI")
+        if (ip.isBlank() || playlist.isBlank()) {
+            toast("Fill in TV IP and playlist URI")
+            return
+        }
+        if (mac.isNotBlank() && !isValidMac(mac)) {
+            toast("That MAC address doesn't look right \u2014 should be 12 hex characters, e.g. AA:BB:CC:DD:EE:FF")
             return
         }
         if (Prefs.clientKey(this) == null) {
@@ -292,10 +303,15 @@ class MainActivity : AppCompatActivity() {
         AlarmScheduler.scheduleNext(this)
         Prefs.markScheduled(this)
         refreshAllStatuses()
-        toast("Alarm scheduled")
+        if (mac.isBlank()) {
+            toast("Alarm scheduled \u2014 no MAC set, so this won't wake an already-off TV. Find the MAC in the TV's own Settings > Network menu and add it here when you can.")
+        } else {
+            toast("Alarm scheduled")
+        }
         requestIgnoreBatteryOptimizations()
     }
 
+    /** Asks the OS not to kill this app in the background, so the scheduled alarm keeps firing reliably. */
     private fun requestIgnoreBatteryOptimizations() {
         val powerManager = getSystemService(POWER_SERVICE) as PowerManager
         if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
@@ -304,6 +320,7 @@ class MainActivity : AppCompatActivity() {
                     Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
                 )
             } catch (e: Exception) {
+                // Some device firmwares don't support this intent — safe to ignore.
             }
         }
     }
@@ -316,12 +333,17 @@ class MainActivity : AppCompatActivity() {
             toast("Save your settings and pair with the TV first")
             return
         }
+        val mac = binding.inputTvMac.text.toString().trim()
+        if (mac.isNotBlank() && !isValidMac(mac)) {
+            toast("That MAC address doesn't look right \u2014 should be 12 hex characters, e.g. AA:BB:CC:DD:EE:FF")
+            return
+        }
         val playlist = normalizePlaylistUri(binding.inputPlaylistUri.text.toString())
         binding.inputPlaylistUri.setText(playlist)
         Prefs.save(
             this,
             ip,
-            binding.inputTvMac.text.toString().trim(),
+            mac,
             playlist,
             binding.inputSpotifyAppId.text.toString().trim().ifBlank { "spotify-beehive" },
             binding.timePicker.hour,
