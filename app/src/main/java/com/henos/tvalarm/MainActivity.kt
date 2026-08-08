@@ -128,6 +128,16 @@ class MainActivity : AppCompatActivity() {
             chip.isChecked = (savedMask and (1 shl (dayOfWeek - Calendar.SUNDAY))) != 0
         }
 
+        binding.seekVolume.progress = Prefs.wakeVolume(this)
+        binding.labelVolume.text = "Wake-up volume: ${Prefs.wakeVolume(this)}"
+        binding.seekVolume.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                binding.labelVolume.text = "Wake-up volume: $progress"
+            }
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+        })
+
         binding.btnConnect.setOnClickListener { doConnect() }
         binding.btnSave.setOnClickListener { doSaveAndSchedule() }
         binding.btnRunNow.setOnClickListener { doRunNow() }
@@ -400,7 +410,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        Prefs.save(this, ip, mac, playlist, appId, hour, minute, daysMask)
+        Prefs.save(this, ip, mac, playlist, appId, hour, minute, daysMask, binding.seekVolume.progress)
 
         if (!AlarmScheduler.canScheduleExact(this)) {
             toast("Grant \"Alarms & reminders\" permission, then tap Save again")
@@ -456,7 +466,8 @@ class MainActivity : AppCompatActivity() {
             binding.inputSpotifyAppId.text.toString().trim().ifBlank { "spotify-beehive" },
             binding.timePicker.hour,
             binding.timePicker.minute,
-            currentDaysMask()
+            currentDaysMask(),
+            binding.seekVolume.progress
         )
         setStatus(binding.statusRun, "Running\u2026", StatusKind.NEUTRAL)
         binding.btnRunNow.isEnabled = false
