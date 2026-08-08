@@ -35,6 +35,7 @@ object Prefs {
     fun isScheduled(context: Context) = get(context).getBoolean("is_scheduled", false)
     fun lastRunAt(context: Context) = get(context).getLong("last_run_at", 0L)
     fun lastRunStatus(context: Context) = get(context).getString("last_run_status", null) // "success" | "failed" | "unreachable"
+    fun nextAlarmAt(context: Context) = get(context).getLong("next_alarm_at", 0L)
 
     fun save(
         context: Context,
@@ -69,6 +70,10 @@ object Prefs {
             .putBoolean("is_scheduled", true)
             .putLong("scheduled_at", System.currentTimeMillis())
             .apply()
+    }
+
+    fun saveNextAlarmAt(context: Context, millis: Long) {
+        get(context).edit().putLong("next_alarm_at", millis).apply()
     }
 
     fun markRunResult(context: Context, status: String) {
