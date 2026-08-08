@@ -38,6 +38,10 @@ class TvAlarmWorker(context: Context, params: WorkerParameters) : Worker(context
         DebugLog.log("TvAlarmWorker", "TV is reachable, waiting 8s for webOS home screen to finish loading")
         Thread.sleep(8000)
 
+        val wakeVolume = Prefs.wakeVolume(ctx)
+        val volumeOk = WebOsClient.setVolume(ip, clientKey, wakeVolume)
+        DebugLog.log("TvAlarmWorker", "setVolume($wakeVolume): ${if (volumeOk) "ok" else "failed, continuing anyway"}")
+
         val ok = WebOsClient.launchApp(ip, clientKey, appId, playlist)
         DebugLog.log("TvAlarmWorker", "RUN COMPLETE: ${if (ok) "success" else "failed"}")
         Prefs.markRunResult(ctx, if (ok) "success" else "failed")
