@@ -21,6 +21,7 @@ object Prefs {
     fun alarmHour(context: Context) = get(context).getInt("alarm_hour", 7)
     fun alarmMinute(context: Context) = get(context).getInt("alarm_minute", 0)
     fun alarmDaysMask(context: Context) = get(context).getInt("alarm_days_mask", DEFAULT_DAYS_MASK)
+    fun wakeVolume(context: Context) = get(context).getInt("wake_volume", 15)
 
     /** True if the given Calendar.DAY_OF_WEEK (SUNDAY=1..SATURDAY=7) is selected. */
     fun isDaySelected(context: Context, calendarDayOfWeek: Int): Boolean {
@@ -45,7 +46,8 @@ object Prefs {
         spotifyAppId: String,
         alarmHour: Int,
         alarmMinute: Int,
-        alarmDaysMask: Int
+        alarmDaysMask: Int,
+        wakeVolume: Int
     ) {
         get(context).edit()
             .putString("tv_ip", tvIp)
@@ -55,6 +57,7 @@ object Prefs {
             .putInt("alarm_hour", alarmHour)
             .putInt("alarm_minute", alarmMinute)
             .putInt("alarm_days_mask", alarmDaysMask)
+            .putInt("wake_volume", wakeVolume)
             .apply()
     }
 
