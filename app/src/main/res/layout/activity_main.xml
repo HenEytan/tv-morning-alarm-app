@@ -40,43 +40,23 @@
                 <TextView android:text="1 \u00b7 Connect to your TV" style="@style/SectionTitle" />
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnScan"
-                    android:text="Scan for TVs on network"
-                    style="@style/OutlinedActionButton"
-                    android:layout_marginTop="0dp"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-
-                <com.google.android.material.textfield.TextInputLayout
-                    style="@style/OutlinedField"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="TV IP address">
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/inputTvIp"
-                        android:inputType="text"
-                        android:importantForAutofill="no"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnPair"
-                    android:text="Connect"
+                    android:id="@+id/btnConnect"
+                    android:text="Connect to TV"
                     style="@style/PrimaryActionButton"
+                    android:layout_marginTop="0dp"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
 
                 <TextView
                     android:id="@+id/statusPair"
-                    android:text="Not paired yet"
+                    android:text="Not connected yet"
                     style="@style/StatusLine"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/toggleMacAdvanced"
-                    android:text="Advanced: set MAC for Wake-on-LAN (optional)"
+                    android:text="Advanced: manual IP / MAC (optional)"
                     style="@style/TextButtonMuted"
                     android:layout_marginTop="4dp"
                     android:layout_gravity="start"
@@ -91,12 +71,25 @@
                     android:layout_height="wrap_content">
 
                     <TextView
-                        android:text="Only needed to wake a TV that is fully powered off. Find it in the TV's own Settings \u2192 Network menu."
+                        android:text="Filled in automatically when Connect finds your TV. Only edit these if scanning doesn't find it, or to set the MAC manually for Wake-on-LAN."
                         android:textSize="12sp"
                         android:textColor="@color/text_secondary"
                         android:layout_marginTop="4dp"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/OutlinedField"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="TV IP address">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/inputTvIp"
+                            android:inputType="text"
+                            android:importantForAutofill="no"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content" />
+                    </com.google.android.material.textfield.TextInputLayout>
 
                     <com.google.android.material.textfield.TextInputLayout
                         style="@style/OutlinedField"
