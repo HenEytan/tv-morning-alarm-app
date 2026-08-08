@@ -1,6 +1,10 @@
 package com.henos.tvalarm
 
 import android.annotation.SuppressLint
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.View
+import androidx.core.content.ContextCompat
 import android.app.AlarmManager
 import android.app.AlertDialog
 import android.content.ClipData
@@ -86,6 +90,18 @@ class MainActivity : AppCompatActivity() {
         setContentView(android.widget.ScrollView(this).apply { addView(container) })
     }
 
+    private enum class StatusKind { SUCCESS, ERROR, NEUTRAL }
+
+    private fun setStatus(view: TextView, text: String, kind: StatusKind) {
+        view.text = text
+        val colorRes = when (kind) {
+            StatusKind.SUCCESS -> R.color.status_success
+            StatusKind.ERROR -> R.color.status_error
+            StatusKind.NEUTRAL -> R.color.status_neutral
+        }
+        view.setTextColor(ContextCompat.getColor(this, colorRes))
+    }
+
     private fun setupUi() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -114,7 +130,36 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
+        binding.toggleMacAdvanced.setOnClickListener {
+            val showing = binding.macAdvancedSection.visibility == View.VISIBLE
+            binding.macAdvancedSection.visibility = if (showing) View.GONE else View.VISIBLE
+            binding.toggleMacAdvanced.text = if (showing)
+                "Advanced: set MAC for Wake-on-LAN (optional)" else "Hide advanced"
+        }
+
+        binding.togglePlaylistAdvanced.setOnClickListener {
+            val showing = binding.playlistAdvancedSection.visibility == View.VISIBLE
+            binding.playlistAdvancedSection.visibility = if (showing) View.GONE else View.VISIBLE
+            binding.togglePlaylistAdvanced.text = if (showing)
+                "Advanced: Spotify app id (optional)" else "Hide advanced"
+        }
+
+        binding.inputPlaylistUri.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) { refreshPlaylistStatus() }
+        })
+
         refreshAllStatuses()
+    }
+
+    private fun refreshPlaylistStatus() {
+        val playlist = binding.inputPlaylistUri.text.toString().trim()
+        if (playlist.isNotBlank()) {
+            setStatus(binding.statusPlaylist, "\u2713 Playlist set", StatusKind.SUCCESS)
+        } else {
+            setStatus(binding.statusPlaylist, "No playlist set yet", StatusKind.NEUTRAL)
+        }
     }
 
     override fun onResume() {
@@ -144,32 +189,34 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetTextI18n")
     private fun refreshAllStatuses() {
         val pairedAt = Prefs.pairedAt(this)
-        binding.statusPair.text = if (Prefs.clientKey(this) != null && pairedAt > 0)
-            "\u2713 Paired on ${timeFmt.format(Date(pairedAt))}"
-        else
-            "Not paired yet"
-
         val pairError = WebOsClient.lastPairError
-        if (Prefs.clientKey(this) == null && pairError != null) {
-            binding.statusPair.text = "\u2717 $pairError"
+        when {
+            Prefs.clientKey(this) != null && pairedAt > 0 ->
+                setStatus(binding.statusPair, "\u2713 Connected on ${timeFmt.format(Date(pairedAt))}", StatusKind.SUCCESS)
+            Prefs.clientKey(this) == null && pairError != null ->
+                setStatus(binding.statusPair, "\u2717 $pairError", StatusKind.ERROR)
+            else ->
+                setStatus(binding.statusPair, "Not connected yet", StatusKind.NEUTRAL)
         }
+
+        refreshPlaylistStatus()
 
         if (Prefs.isScheduled(this)) {
             val h = Prefs.alarmHour(this)
             val m = Prefs.alarmMinute(this)
             val days = formatDaysMask(Prefs.alarmDaysMask(this))
-            binding.statusSchedule.text = "\u2713 Scheduled at %02d:%02d \u2014 $days".format(h, m)
+            setStatus(binding.statusSchedule, "\u2713 Scheduled at %02d:%02d \u2014 $days".format(h, m), StatusKind.SUCCESS)
         } else {
-            binding.statusSchedule.text = "Not scheduled yet"
+            setStatus(binding.statusSchedule, "Not scheduled yet", StatusKind.NEUTRAL)
         }
 
         val lastRunAt = Prefs.lastRunAt(this)
         val lastRunStatus = Prefs.lastRunStatus(this)
-        binding.statusRun.text = when {
-            lastRunAt == 0L -> "Not run yet"
-            lastRunStatus == "success" -> "\u2713 Last run succeeded \u2014 ${timeFmt.format(Date(lastRunAt))}"
-            lastRunStatus == "unreachable" -> "\u2717 Last run failed \u2014 TV unreachable (${timeFmt.format(Date(lastRunAt))})"
-            else -> "\u2717 Last run failed \u2014 ${timeFmt.format(Date(lastRunAt))}"
+        when {
+            lastRunAt == 0L -> setStatus(binding.statusRun, "Not run yet", StatusKind.NEUTRAL)
+            lastRunStatus == "success" -> setStatus(binding.statusRun, "\u2713 Last run succeeded \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.SUCCESS)
+            lastRunStatus == "unreachable" -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 TV unreachable (${timeFmt.format(Date(lastRunAt))})", StatusKind.ERROR)
+            else -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.ERROR)
         }
     }
 
@@ -350,7 +397,7 @@ class MainActivity : AppCompatActivity() {
             binding.timePicker.minute,
             currentDaysMask()
         )
-        binding.statusRun.text = "Running\u2026"
+        setStatus(binding.statusRun, "Running\u2026", StatusKind.NEUTRAL)
         binding.btnRunNow.isEnabled = false
 
         val request = OneTimeWorkRequestBuilder<TvAlarmWorker>().build()
