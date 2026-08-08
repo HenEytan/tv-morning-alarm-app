@@ -360,8 +360,38 @@ object WebOsClient {
                 return mac
             }
         }
-        DebugLog.log(TAG, "getMacAddress: FAILED over all endpoints (couldn't determine MAC)")
+        DebugLog.log(TAG, "getMacAddress: SSAP lookup failed on all endpoints, trying local ARP table")
+        val arpMac = getMacFromArpTable(ip)
+        if (arpMac != null) {
+            DebugLog.log(TAG, "getMacAddress: SUCCESS via local ARP table - mac=$arpMac")
+            return arpMac
+        }
+        DebugLog.log(TAG, "getMacAddress: FAILED over SSAP and ARP table (couldn't determine MAC)")
         return null
+    }
+
+    /**
+     * Some webOS firmware doesn't expose its MAC over SSAP at all. As a fallback,
+     * read the Android device's own ARP cache (/proc/net/arp) for a row matching
+     * this IP \u2014 the kernel populates this automatically after any TCP connection
+     * to that IP, which waitForTv()/pair() have already done by the time this runs.
+     * Not available on every device/Android version; fails safe (returns null).
+     */
+    private fun getMacFromArpTable(ip: String): String? {
+        return try {
+            java.io.File("/proc/net/arp").readLines().drop(1)
+                .map { it.trim().split(Regex("\\s+")) }
+                .firstOrNull { cols -> cols.firstOrNull() == ip }
+                ?.getOrNull(3)
+                ?.takeIf { mac ->
+                    mac != "00:00:00:00:00:00" &&
+                        Regex("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$").matches(mac)
+                }
+                ?.uppercase()
+        } catch (e: Exception) {
+            DebugLog.log(TAG, "getMacFromArpTable: unavailable - ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
     }
 
     private fun getMacOverEndpoint(endpoint: Endpoint, clientKey: String): String? {
