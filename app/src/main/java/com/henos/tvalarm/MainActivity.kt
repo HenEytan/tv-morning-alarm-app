@@ -119,8 +119,7 @@ class MainActivity : AppCompatActivity() {
             chip.isChecked = (savedMask and (1 shl (dayOfWeek - Calendar.SUNDAY))) != 0
         }
 
-        binding.btnScan.setOnClickListener { doScan() }
-        binding.btnPair.setOnClickListener { doPair() }
+        binding.btnConnect.setOnClickListener { doConnect() }
         binding.btnSave.setOnClickListener { doSaveAndSchedule() }
         binding.btnRunNow.setOnClickListener { doRunNow() }
         binding.btnViewLog.setOnClickListener { showDebugLog() }
@@ -222,48 +221,62 @@ class MainActivity : AppCompatActivity() {
 
     private fun currentIp() = binding.inputTvIp.text.toString().trim()
 
-    private fun doScan() {
-        toast("Scanning network for TVs...")
-        binding.btnScan.isEnabled = false
+    /**
+     * Single-button flow: scans the network, auto-picks the TV if there's
+     * exactly one (or lets the user pick if there are several), connects,
+     * and stores whatever MAC address it can find along the way. IP and
+     * MAC are stored automatically \u2014 nothing to type for the normal case.
+     */
+    private fun doConnect() {
+        DebugLog.section("USER TAPPED: Connect to TV")
+        binding.btnConnect.isEnabled = false
+        setStatus(binding.statusPair, "Searching for your TV\u2026", StatusKind.NEUTRAL)
         thread {
             val devices = try {
                 SsdpDiscovery.discover(this)
             } catch (e: Exception) {
                 emptyList()
             }
-            runOnUiThread {
-                binding.btnScan.isEnabled = true
-                if (devices.isEmpty()) {
-                    toast("No TVs found \u2014 make sure the TV is on and on the same network")
-                    return@runOnUiThread
+            when {
+                devices.size == 1 -> proceedWithIp(devices[0].ip)
+                devices.size > 1 -> runOnUiThread {
+                    val labels = devices.map { "${it.name}  (${it.ip})" }.toTypedArray()
+                    AlertDialog.Builder(this)
+                        .setTitle("Select your TV")
+                        .setCancelable(false)
+                        .setItems(labels) { _, which -> proceedWithIp(devices[which].ip) }
+                        .setOnCancelListener { binding.btnConnect.isEnabled = true; refreshAllStatuses() }
+                        .show()
                 }
-                val labels = devices.map { "${it.name}  (${it.ip})" }.toTypedArray()
-                AlertDialog.Builder(this)
-                    .setTitle("Select your TV")
-                    .setItems(labels) { _, which ->
-                        val picked = devices[which]
-                        binding.inputTvIp.setText(picked.ip)
-                        toast("Filled in IP for ${picked.name} \u2014 now tap Pair with TV (MAC fills in automatically after pairing)")
+                else -> {
+                    // Nothing found via scan \u2014 fall back to the last IP that worked, if any.
+                    val savedIp = Prefs.tvIp(this)
+                    if (savedIp.isNotBlank() && WebOsClient.waitForTv(savedIp, timeoutMs = 8_000)) {
+                        proceedWithIp(savedIp)
+                    } else {
+                        runOnUiThread {
+                            binding.btnConnect.isEnabled = true
+                            setStatus(binding.statusPair, "\u2717 No TV found on the network", StatusKind.ERROR)
+                            toast("No TVs found \u2014 make sure the TV is on and on the same Wi-Fi network")
+                        }
                     }
-                    .show()
+                }
             }
         }
     }
 
-    private fun doPair() {
-        DebugLog.section("USER TAPPED: Pair with TV")
-        val ip = currentIp()
-        if (ip.isBlank()) {
-            toast("Enter the TV's IP address first")
-            return
+    /** Connects to a known IP: waits for it to be reachable, pairs, and fetches the MAC if possible. */
+    private fun proceedWithIp(ip: String) {
+        runOnUiThread {
+            binding.inputTvIp.setText(ip)
+            setStatus(binding.statusPair, "Connecting to $ip\u2026", StatusKind.NEUTRAL)
         }
-        binding.btnPair.isEnabled = false
-        toast("Connecting to TV...")
         thread {
             if (!WebOsClient.waitForTv(ip, timeoutMs = 15_000)) {
                 runOnUiThread {
-                    binding.btnPair.isEnabled = true
-                    toast("Can't reach the TV \u2014 make sure it's on for pairing")
+                    binding.btnConnect.isEnabled = true
+                    setStatus(binding.statusPair, "\u2717 Can't reach the TV", StatusKind.ERROR)
+                    toast("Can't reach the TV \u2014 make sure it's turned on")
                 }
                 return@thread
             }
@@ -272,23 +285,24 @@ class MainActivity : AppCompatActivity() {
             }
             if (key != null) {
                 Prefs.saveClientKey(this, key)
-                // Ask the TV for its own MAC address (works regardless of Android's
-                // network-privacy restrictions, since we ask the TV, not the OS).
+                // Ask the TV for its own MAC first; if the firmware doesn't expose that,
+                // WebOsClient falls back to reading it from the local ARP table.
                 val mac = WebOsClient.getMacAddress(ip, key)
                 runOnUiThread {
-                    binding.btnPair.isEnabled = true
+                    binding.btnConnect.isEnabled = true
                     if (mac != null) {
                         binding.inputTvMac.setText(mac)
-                        toast("Paired \u2014 MAC address filled in automatically")
+                        toast("Connected \u2014 ready to go, Wake-on-LAN is set up")
                     } else {
-                        toast("Paired \u2014 couldn't read the MAC automatically, enter it manually")
+                        toast("Connected \u2014 couldn't determine the MAC automatically, so Wake-on-LAN won't turn on an already-off TV yet")
                     }
                     refreshAllStatuses()
                 }
             } else {
                 runOnUiThread {
-                    binding.btnPair.isEnabled = true
-                    toast("Pairing failed: ${WebOsClient.lastPairError ?: "unknown error"}")
+                    binding.btnConnect.isEnabled = true
+                    toast("Connection failed: ${WebOsClient.lastPairError ?: "unknown error"}")
+                    refreshAllStatuses()
                 }
             }
         }
@@ -331,7 +345,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (Prefs.clientKey(this) == null) {
-            toast("Pair with the TV first (step 1)")
+            toast("Connect to the TV first (step 1)")
             return
         }
         if (daysMask == 0) {
@@ -377,7 +391,7 @@ class MainActivity : AppCompatActivity() {
         DebugLog.section("USER TAPPED: Run Now")
         val ip = currentIp()
         if (ip.isBlank() || Prefs.clientKey(this) == null) {
-            toast("Save your settings and pair with the TV first")
+            toast("Save your settings and connect to the TV first")
             return
         }
         val mac = binding.inputTvMac.text.toString().trim()
