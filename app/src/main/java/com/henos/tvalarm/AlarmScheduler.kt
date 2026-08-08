@@ -30,6 +30,7 @@ object AlarmScheduler {
             guard++
         }
         DebugLog.log("AlarmScheduler", "scheduleNext: next fire at ${next.time} (daysMask=$daysMask)")
+        Prefs.saveNextAlarmAt(context, next.timeInMillis)
 
         val intent = Intent(context, AlarmReceiver::class.java)
         val pendingIntent = PendingIntent.getBroadcast(
