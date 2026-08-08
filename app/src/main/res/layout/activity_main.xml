@@ -60,22 +60,9 @@
                         android:layout_height="wrap_content" />
                 </com.google.android.material.textfield.TextInputLayout>
 
-                <com.google.android.material.textfield.TextInputLayout
-                    style="@style/OutlinedField"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="TV MAC address">
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/inputTvMac"
-                        android:inputType="text"
-                        android:importantForAutofill="no"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
-                </com.google.android.material.textfield.TextInputLayout>
-
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnPair"
-                    android:text="Pair with TV"
+                    android:text="Connect"
                     style="@style/PrimaryActionButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
@@ -86,6 +73,44 @@
                     style="@style/StatusLine"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/toggleMacAdvanced"
+                    android:text="Advanced: set MAC for Wake-on-LAN (optional)"
+                    style="@style/TextButtonMuted"
+                    android:layout_marginTop="4dp"
+                    android:layout_gravity="start"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+
+                <LinearLayout
+                    android:id="@+id/macAdvancedSection"
+                    android:orientation="vertical"
+                    android:visibility="gone"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <TextView
+                        android:text="Only needed to wake a TV that is fully powered off. Find it in the TV's own Settings \u2192 Network menu."
+                        android:textSize="12sp"
+                        android:textColor="@color/text_secondary"
+                        android:layout_marginTop="4dp"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/OutlinedField"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="TV MAC address (optional)">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/inputTvMac"
+                            android:inputType="text"
+                            android:importantForAutofill="no"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                </LinearLayout>
 
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
@@ -104,7 +129,7 @@
                     android:layout_marginTop="0dp"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="Spotify playlist URI">
+                    android:hint="Spotify playlist link or URI">
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/inputPlaylistUri"
                         android:inputType="text"
@@ -113,19 +138,43 @@
                         android:layout_height="wrap_content" />
                 </com.google.android.material.textfield.TextInputLayout>
 
-                <com.google.android.material.textfield.TextInputLayout
-                    style="@style/OutlinedField"
+                <TextView
+                    android:id="@+id/statusPlaylist"
+                    android:text="No playlist set yet"
+                    style="@style/StatusLine"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="Spotify app id on TV">
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/inputSpotifyAppId"
-                        android:text="spotify-beehive"
-                        android:inputType="text"
-                        android:importantForAutofill="no"
+                    android:layout_height="wrap_content" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/togglePlaylistAdvanced"
+                    android:text="Advanced: Spotify app id (optional)"
+                    style="@style/TextButtonMuted"
+                    android:layout_marginTop="4dp"
+                    android:layout_gravity="start"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+
+                <LinearLayout
+                    android:id="@+id/playlistAdvancedSection"
+                    android:orientation="vertical"
+                    android:visibility="gone"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/OutlinedField"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
-                </com.google.android.material.textfield.TextInputLayout>
+                        android:layout_height="wrap_content"
+                        android:hint="Spotify app id on TV">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/inputSpotifyAppId"
+                            android:text="spotify-beehive"
+                            android:inputType="text"
+                            android:importantForAutofill="no"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                </LinearLayout>
 
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
