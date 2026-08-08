@@ -348,6 +348,81 @@ object WebOsClient {
         return success
     }
 
+    // ---- Volume -------------------------------------------------------------
+
+    /** Blocking. Call from a background thread. Sets the TV's volume (0-100). Returns true on success. */
+    fun setVolume(ip: String, clientKey: String, volume: Int): Boolean {
+        DebugLog.section("SET VOLUME ip=$ip volume=$volume")
+        for (endpoint in endpointsFor(ip)) {
+            if (setVolumeOverEndpoint(endpoint, clientKey, volume)) {
+                DebugLog.log(TAG, "setVolume: SUCCESS via ${endpoint.url}")
+                return true
+            }
+        }
+        DebugLog.log(TAG, "setVolume: FAILED over all endpoints")
+        return false
+    }
+
+    private fun setVolumeOverEndpoint(endpoint: Endpoint, clientKey: String, volume: Int): Boolean {
+        DebugLog.log(TAG, "setVolumeOverEndpoint: trying ${endpoint.url}")
+        val client = clientFor(endpoint.secure)
+        val latch = CountDownLatch(1)
+        var success = false
+        val request = Request.Builder().url(endpoint.url).build()
+        val ws = try {
+            client.newWebSocket(request, object : WebSocketListener() {
+                var registered = false
+
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    val payload = JSONObject().apply {
+                        put("forcePairing", false)
+                        put("pairingType", "PROMPT")
+                        put("manifest", manifest())
+                        put("client-key", clientKey)
+                    }
+                    val msg = JSONObject().apply {
+                        put("type", "register")
+                        put("id", UUID.randomUUID().toString())
+                        put("payload", payload)
+                    }
+                    webSocket.send(msg.toString())
+                }
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    DebugLog.log(TAG, "${endpoint.url}: received: $text")
+                    val resp = JSONObject(text)
+                    val type = resp.optString("type")
+                    if (type == "registered" && !registered) {
+                        registered = true
+                        val volumeMsg = JSONObject().apply {
+                            put("type", "request")
+                            put("id", UUID.randomUUID().toString())
+                            put("uri", "ssap://audio/setVolume")
+                            put("payload", JSONObject().put("volume", volume))
+                        }
+                        webSocket.send(volumeMsg.toString())
+                    } else if (type == "response" || type == "error") {
+                        success = type == "response"
+                        latch.countDown()
+                    }
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    DebugLog.log(TAG, "${endpoint.url}: onFailure - ${t.javaClass.simpleName}: ${t.message}")
+                    latch.countDown()
+                }
+            })
+        } catch (e: Exception) {
+            DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
+            return false
+        }
+        val completed = latch.await(10, TimeUnit.SECONDS)
+        if (!completed) DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for setVolume response")
+        ws.close(1000, null)
+        client.dispatcher.executorService.shutdown()
+        return success
+    }
+
     // ---- MAC address lookup ------------------------------------------------
 
     /** Blocking. Call from a background thread. Returns the TV's active MAC address, or null. */
