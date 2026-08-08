@@ -1,6 +1,8 @@
 package com.henos.tvalarm
 
 import android.annotation.SuppressLint
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
@@ -32,6 +34,13 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val timeFmt = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
+    private val countdownHandler = Handler(Looper.getMainLooper())
+    private val countdownTicker = object : Runnable {
+        override fun run() {
+            updateCountdown()
+            countdownHandler.postDelayed(this, 30_000)
+        }
+    }
 
     /** Maps each day chip to its java.util.Calendar.DAY_OF_WEEK constant. */
     private val dayChips: List<Pair<Chip, Int>> by lazy {
@@ -163,7 +172,16 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::binding.isInitialized) refreshAllStatuses()
+        if (::binding.isInitialized) {
+            refreshAllStatuses()
+            countdownHandler.removeCallbacks(countdownTicker)
+            countdownHandler.post(countdownTicker)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        countdownHandler.removeCallbacks(countdownTicker)
     }
 
     private fun currentDaysMask(): Int {
@@ -217,6 +235,31 @@ class MainActivity : AppCompatActivity() {
             lastRunStatus == "unreachable" -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 TV unreachable (${timeFmt.format(Date(lastRunAt))})", StatusKind.ERROR)
             else -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.ERROR)
         }
+
+        updateCountdown()
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun updateCountdown() {
+        if (!Prefs.isScheduled(this)) {
+            binding.statusCountdown.text = ""
+            return
+        }
+        val nextAt = Prefs.nextAlarmAt(this)
+        val diffMs = nextAt - System.currentTimeMillis()
+        binding.statusCountdown.text = when {
+            nextAt <= 0L -> ""
+            diffMs <= 0L -> "Ringing any moment\u2026"
+            else -> {
+                val totalMinutes = (diffMs / 60_000).toInt()
+                val h = totalMinutes / 60
+                val m = totalMinutes % 60
+                val parts = mutableListOf<String>()
+                if (h > 0) parts.add("${h}h")
+                parts.add("${m}m")
+                "Next alarm in ${parts.joinToString(" ")}"
+            }
+        }
     }
 
     private fun currentIp() = binding.inputTvIp.text.toString().trim()
@@ -245,7 +288,7 @@ class MainActivity : AppCompatActivity() {
                         .setTitle("Select your TV")
                         .setCancelable(false)
                         .setItems(labels) { _, which -> proceedWithIp(devices[which].ip) }
-                        .setOnCancelListener { binding.btnConnect.isEnabled = true; refreshAllStatuses() }
+                        .setOnCancelListener { binding.btnConnect.isEnabled = true; binding.btnConnect.text = "Try Again"; refreshAllStatuses() }
                         .show()
                 }
                 else -> {
@@ -256,6 +299,7 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         runOnUiThread {
                             binding.btnConnect.isEnabled = true
+                            binding.btnConnect.text = "Try Again"
                             setStatus(binding.statusPair, "\u2717 No TV found on the network", StatusKind.ERROR)
                             toast("No TVs found \u2014 make sure the TV is on and on the same Wi-Fi network")
                         }
@@ -275,6 +319,7 @@ class MainActivity : AppCompatActivity() {
             if (!WebOsClient.waitForTv(ip, timeoutMs = 15_000)) {
                 runOnUiThread {
                     binding.btnConnect.isEnabled = true
+                    binding.btnConnect.text = "Try Again"
                     setStatus(binding.statusPair, "\u2717 Can't reach the TV", StatusKind.ERROR)
                     toast("Can't reach the TV \u2014 make sure it's turned on")
                 }
@@ -290,17 +335,19 @@ class MainActivity : AppCompatActivity() {
                 val mac = WebOsClient.getMacAddress(ip, key)
                 runOnUiThread {
                     binding.btnConnect.isEnabled = true
+                    binding.btnConnect.text = "Reconnect"
                     if (mac != null) {
                         binding.inputTvMac.setText(mac)
                         toast("Connected \u2014 ready to go, Wake-on-LAN is set up")
                     } else {
-                        toast("Connected \u2014 couldn't determine the MAC automatically, so Wake-on-LAN won't turn on an already-off TV yet")
+                        toast("Connected, but this TV won't hand over its MAC automatically \u2014 open Advanced and enter it manually (find it in the TV's own Settings \u2192 Network menu) for Wake-on-LAN to work")
                     }
                     refreshAllStatuses()
                 }
             } else {
                 runOnUiThread {
                     binding.btnConnect.isEnabled = true
+                    binding.btnConnect.text = "Try Again"
                     toast("Connection failed: ${WebOsClient.lastPairError ?: "unknown error"}")
                     refreshAllStatuses()
                 }
