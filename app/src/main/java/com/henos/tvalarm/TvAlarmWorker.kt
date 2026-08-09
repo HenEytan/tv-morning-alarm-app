@@ -17,6 +17,14 @@ class TvAlarmWorker(context: Context, params: WorkerParameters) : Worker(context
 
         DebugLog.log("TvAlarmWorker", "config: ip=$ip mac=$mac appId=$appId playlist=$playlist hasClientKey=${clientKey != null}")
 
+        val myDeviceId = Prefs.deviceId(ctx)
+        val activeDeviceId = Prefs.activeDeviceId(ctx)
+        if (activeDeviceId != null && activeDeviceId != myDeviceId) {
+            DebugLog.log("TvAlarmWorker", "SKIP: this device is not the designated alarm device (active=$activeDeviceId, this device=$myDeviceId)")
+            Prefs.markRunResult(ctx, "skipped")
+            return Result.success()
+        }
+
         if (ip.isBlank() || playlist.isBlank() || clientKey == null) {
             DebugLog.log("TvAlarmWorker", "ABORT: missing required config")
             Prefs.markRunResult(ctx, "failed")
