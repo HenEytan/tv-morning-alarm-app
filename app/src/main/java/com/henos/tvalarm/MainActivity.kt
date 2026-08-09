@@ -127,6 +127,12 @@ class MainActivity : AppCompatActivity() {
         })
 
         binding.btnConnect.setOnClickListener { doConnect() }
+        binding.btnClaimActive.setOnClickListener {
+            Prefs.setActiveDevice(this, Prefs.deviceId(this), Prefs.deviceLabel())
+            refreshActiveDeviceStatus()
+            toast("This device will now fire the alarm")
+            thread { SettingsSync.push(this) }
+        }
         binding.btnSave.setOnClickListener { doSaveAndSchedule() }
         binding.btnRunNow.setOnClickListener { doRunNow() }
         binding.btnViewLog.setOnClickListener { showDebugLog() }
@@ -256,11 +262,29 @@ class MainActivity : AppCompatActivity() {
         when {
             lastRunAt == 0L -> setStatus(binding.statusRun, "Not run yet", StatusKind.NEUTRAL)
             lastRunStatus == "success" -> setStatus(binding.statusRun, "\u2713 Last run succeeded \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.SUCCESS)
+            lastRunStatus == "skipped" -> setStatus(binding.statusRun, "Skipped \u2014 not the active alarm device (${timeFmt.format(Date(lastRunAt))})", StatusKind.NEUTRAL)
             lastRunStatus == "unreachable" -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 TV unreachable (${timeFmt.format(Date(lastRunAt))})", StatusKind.ERROR)
             else -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.ERROR)
         }
 
         updateCountdown()
+        refreshActiveDeviceStatus()
+    }
+
+    private fun refreshActiveDeviceStatus() {
+        val myId = Prefs.deviceId(this)
+        val activeId = Prefs.activeDeviceId(this)
+        when {
+            activeId == null || activeId == myId -> {
+                setStatus(binding.statusActiveDevice, "\u2713 This device fires the alarm", StatusKind.SUCCESS)
+                binding.btnClaimActive.visibility = View.GONE
+            }
+            else -> {
+                val label = Prefs.activeDeviceLabel(this) ?: "another device"
+                setStatus(binding.statusActiveDevice, "Alarm fires from: $label", StatusKind.NEUTRAL)
+                binding.btnClaimActive.visibility = View.VISIBLE
+            }
+        }
     }
 
     @SuppressLint("SetTextI18n")
