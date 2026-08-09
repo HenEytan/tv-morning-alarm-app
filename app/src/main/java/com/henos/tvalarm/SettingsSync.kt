@@ -57,7 +57,8 @@ object SettingsSync {
                 val decoded = String(Base64.getDecoder().decode(contentB64))
                 val json = JSONObject(decoded)
                 if (!json.optBoolean("initialized", false)) {
-                    DebugLog.log(TAG, "shared settings not yet initialized - pushing this device's settings as the baseline")
+                    DebugLog.log(TAG, "shared settings not yet initialized - this device becomes the baseline and the active alarm device")
+                    Prefs.setActiveDevice(context, Prefs.deviceId(context), Prefs.deviceLabel())
                     push(context, knownSha = body.getString("sha"))
                     return
                 }
@@ -72,6 +73,11 @@ object SettingsSync {
                     json.optInt("alarmDaysMask", Prefs.alarmDaysMask(context)),
                     json.optInt("wakeVolume", Prefs.wakeVolume(context))
                 )
+                val activeId = json.optString("activeDeviceId", "").ifBlank { null }
+                val activeLabel = json.optString("activeDeviceLabel", "").ifBlank { null }
+                if (activeId != null && activeLabel != null) {
+                    Prefs.setActiveDevice(context, activeId, activeLabel)
+                }
                 if (Prefs.isScheduled(context)) {
                     AlarmScheduler.scheduleNext(context)
                     Prefs.markScheduled(context)
@@ -98,6 +104,8 @@ object SettingsSync {
                 put("alarmMinute", Prefs.alarmMinute(context))
                 put("alarmDaysMask", Prefs.alarmDaysMask(context))
                 put("wakeVolume", Prefs.wakeVolume(context))
+                put("activeDeviceId", Prefs.activeDeviceId(context) ?: "")
+                put("activeDeviceLabel", Prefs.activeDeviceLabel(context) ?: "")
             }
             val contentB64 = Base64.getEncoder().encodeToString(json.toString(2).toByteArray())
             val payload = JSONObject().apply {
