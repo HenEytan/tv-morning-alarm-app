@@ -1,7 +1,9 @@
 package com.henos.tvalarm
 
 import android.content.Context
+import android.os.Build
 import java.util.Calendar
+import java.util.UUID
 
 object Prefs {
     private const val NAME = "tvalarm_prefs"
@@ -22,6 +24,34 @@ object Prefs {
     fun alarmMinute(context: Context) = get(context).getInt("alarm_minute", 0)
     fun alarmDaysMask(context: Context) = get(context).getInt("alarm_days_mask", DEFAULT_DAYS_MASK)
     fun wakeVolume(context: Context) = get(context).getInt("wake_volume", 15)
+    fun nextAlarmAt(context: Context) = get(context).getLong("next_alarm_at", 0L)
+
+    /**
+     * A stable random identifier for THIS install, generated once and never synced.
+     * Used to determine which physical device is the designated "active" alarm device
+     * when multiple devices share the same synced settings.
+     */
+    fun deviceId(context: Context): String {
+        val existing = get(context).getString("device_id", null)
+        if (existing != null) return existing
+        val fresh = UUID.randomUUID().toString()
+        get(context).edit().putString("device_id", fresh).apply()
+        return fresh
+    }
+
+    /** Human-readable label for this device, e.g. "Xiaomi Mi Box S". Not stored, just derived. */
+    fun deviceLabel(): String = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
+
+    /** Which device's deviceId is designated to actually fire the alarm. Null = unrestricted (any device may fire). */
+    fun activeDeviceId(context: Context) = get(context).getString("active_device_id", null)
+    fun activeDeviceLabel(context: Context) = get(context).getString("active_device_label", null)
+
+    fun setActiveDevice(context: Context, id: String, label: String) {
+        get(context).edit()
+            .putString("active_device_id", id)
+            .putString("active_device_label", label)
+            .apply()
+    }
 
     /** True if the given Calendar.DAY_OF_WEEK (SUNDAY=1..SATURDAY=7) is selected. */
     fun isDaySelected(context: Context, calendarDayOfWeek: Int): Boolean {
@@ -35,8 +65,7 @@ object Prefs {
     fun scheduledAt(context: Context) = get(context).getLong("scheduled_at", 0L)
     fun isScheduled(context: Context) = get(context).getBoolean("is_scheduled", false)
     fun lastRunAt(context: Context) = get(context).getLong("last_run_at", 0L)
-    fun lastRunStatus(context: Context) = get(context).getString("last_run_status", null) // "success" | "failed" | "unreachable"
-    fun nextAlarmAt(context: Context) = get(context).getLong("next_alarm_at", 0L)
+    fun lastRunStatus(context: Context) = get(context).getString("last_run_status", null) // "success" | "failed" | "unreachable" | "skipped"
 
     fun save(
         context: Context,
