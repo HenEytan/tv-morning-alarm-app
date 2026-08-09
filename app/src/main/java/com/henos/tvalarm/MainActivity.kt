@@ -262,8 +262,11 @@ class MainActivity : AppCompatActivity() {
         when {
             lastRunAt == 0L -> setStatus(binding.statusRun, "Not run yet", StatusKind.NEUTRAL)
             lastRunStatus == "success" -> setStatus(binding.statusRun, "\u2713 Last run succeeded \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.SUCCESS)
+            lastRunStatus == "fallback_success" -> setStatus(binding.statusRun, "\u2713 Backup run succeeded, active device didn't respond \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.SUCCESS)
             lastRunStatus == "skipped" -> setStatus(binding.statusRun, "Skipped \u2014 not the active alarm device (${timeFmt.format(Date(lastRunAt))})", StatusKind.NEUTRAL)
             lastRunStatus == "unreachable" -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 TV unreachable (${timeFmt.format(Date(lastRunAt))})", StatusKind.ERROR)
+            lastRunStatus == "fallback_unreachable" -> setStatus(binding.statusRun, "\u2717 Backup attempt failed \u2014 TV unreachable (${timeFmt.format(Date(lastRunAt))})", StatusKind.ERROR)
+            lastRunStatus == "fallback_failed" -> setStatus(binding.statusRun, "\u2717 Backup attempt failed \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.ERROR)
             else -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.ERROR)
         }
 
