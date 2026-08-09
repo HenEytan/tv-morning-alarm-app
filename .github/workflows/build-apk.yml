@@ -33,6 +33,8 @@ jobs:
 
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace
+        env:
+          SETTINGS_SYNC_TOKEN: ${{ secrets.SETTINGS_SYNC_TOKEN }}
 
       - name: Publish APK as release
         uses: softprops/action-gh-release@v2
