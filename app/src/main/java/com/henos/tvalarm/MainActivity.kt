@@ -115,21 +115,9 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.inputTvIp.setText(Prefs.tvIp(this))
-        binding.inputTvMac.setText(Prefs.tvMac(this))
-        binding.inputPlaylistUri.setText(Prefs.playlistUri(this))
-        binding.inputSpotifyAppId.setText(Prefs.spotifyAppId(this))
         binding.timePicker.setIs24HourView(true)
-        binding.timePicker.hour = Prefs.alarmHour(this)
-        binding.timePicker.minute = Prefs.alarmMinute(this)
+        populateFieldsFromPrefs()
 
-        val savedMask = Prefs.alarmDaysMask(this)
-        dayChips.forEach { (chip, dayOfWeek) ->
-            chip.isChecked = (savedMask and (1 shl (dayOfWeek - Calendar.SUNDAY))) != 0
-        }
-
-        binding.seekVolume.progress = Prefs.wakeVolume(this)
-        binding.labelVolume.text = "Wake-up volume: ${Prefs.wakeVolume(this)}"
         binding.seekVolume.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
                 binding.labelVolume.text = "Wake-up volume: $progress"
@@ -169,6 +157,32 @@ class MainActivity : AppCompatActivity() {
         })
 
         refreshAllStatuses()
+
+        thread {
+            SettingsSync.pullOrBootstrap(this)
+            runOnUiThread {
+                populateFieldsFromPrefs()
+                refreshAllStatuses()
+            }
+        }
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun populateFieldsFromPrefs() {
+        binding.inputTvIp.setText(Prefs.tvIp(this))
+        binding.inputTvMac.setText(Prefs.tvMac(this))
+        binding.inputPlaylistUri.setText(Prefs.playlistUri(this))
+        binding.inputSpotifyAppId.setText(Prefs.spotifyAppId(this))
+        binding.timePicker.hour = Prefs.alarmHour(this)
+        binding.timePicker.minute = Prefs.alarmMinute(this)
+
+        val savedMask = Prefs.alarmDaysMask(this)
+        dayChips.forEach { (chip, dayOfWeek) ->
+            chip.isChecked = (savedMask and (1 shl (dayOfWeek - Calendar.SUNDAY))) != 0
+        }
+
+        binding.seekVolume.progress = Prefs.wakeVolume(this)
+        binding.labelVolume.text = "Wake-up volume: ${Prefs.wakeVolume(this)}"
     }
 
     private fun refreshPlaylistStatus() {
@@ -421,6 +435,7 @@ class MainActivity : AppCompatActivity() {
         AlarmScheduler.scheduleNext(this)
         Prefs.markScheduled(this)
         refreshAllStatuses()
+        thread { SettingsSync.push(this) }
         if (mac.isBlank()) {
             toast("Alarm scheduled \u2014 no MAC set, so this won't wake an already-off TV. Find the MAC in the TV's own Settings > Network menu and add it here when you can.")
         } else {
