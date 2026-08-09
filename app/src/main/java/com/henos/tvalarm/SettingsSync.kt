@@ -143,4 +143,71 @@ object SettingsSync {
             null
         }
     }
+
+    /** Blocking. Fetches the raw shared JSON + its sha, straight from GitHub (no local caching). */
+    private fun fetchRemote(tok: String): Pair<JSONObject, String>? {
+        return try {
+            val req = Request.Builder()
+                .url(API_URL)
+                .addHeader("Authorization", "Bearer $tok")
+                .addHeader("Accept", "application/vnd.github+json")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                val body = JSONObject(resp.body?.string() ?: return null)
+                val sha = body.getString("sha")
+                val contentB64 = body.getString("content").replace("\n", "")
+                val decoded = String(Base64.getDecoder().decode(contentB64))
+                JSONObject(decoded) to sha
+            }
+        } catch (e: Exception) {
+            DebugLog.log(TAG, "fetchRemote failed: ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Blocking. Live network check (not the local cache): does the shared file already record
+     * an alarm attempt for the given date (yyyy-MM-dd), by any device? Used by backup devices
+     * to decide whether to take over after the active device stayed silent.
+     */
+    fun hasAttemptToday(dateStr: String): Boolean {
+        val tok = token() ?: return false
+        val (json, _) = fetchRemote(tok) ?: return false
+        return json.optString("lastAttemptDate", "") == dateStr
+    }
+
+    /**
+     * Blocking. Records that this device attempted the alarm today, merging into whatever is
+     * currently in the shared file (read-modify-write) so a concurrent write from another device
+     * updating playlist/schedule/etc isn't clobbered.
+     */
+    fun markAttempt(context: Context, dateStr: String, status: String) {
+        val tok = token() ?: return
+        try {
+            val (remoteJson, sha) = fetchRemote(tok) ?: return
+            remoteJson.put("lastAttemptDate", dateStr)
+            remoteJson.put("lastAttemptStatus", status)
+            remoteJson.put("lastAttemptByDeviceId", Prefs.deviceId(context))
+            remoteJson.put("lastAttemptByDeviceLabel", Prefs.deviceLabel())
+            val contentB64 = Base64.getEncoder().encodeToString(remoteJson.toString(2).toByteArray())
+            val payload = JSONObject().apply {
+                put("message", "Record alarm attempt from device")
+                put("content", contentB64)
+                put("branch", "main")
+                put("sha", sha)
+            }
+            val req = Request.Builder()
+                .url(API_URL)
+                .addHeader("Authorization", "Bearer $tok")
+                .addHeader("Accept", "application/vnd.github+json")
+                .put(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                DebugLog.log(TAG, "markAttempt: HTTP ${resp.code}")
+            }
+        } catch (e: Exception) {
+            DebugLog.log(TAG, "markAttempt failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+    }
 }
