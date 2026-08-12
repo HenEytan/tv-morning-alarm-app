@@ -115,9 +115,21 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        binding.inputTvIp.setText(Prefs.tvIp(this))
+        binding.inputTvMac.setText(Prefs.tvMac(this))
+        binding.inputPlaylistUri.setText(Prefs.playlistUri(this))
+        binding.inputSpotifyAppId.setText(Prefs.spotifyAppId(this))
         binding.timePicker.setIs24HourView(true)
-        populateFieldsFromPrefs()
+        binding.timePicker.hour = Prefs.alarmHour(this)
+        binding.timePicker.minute = Prefs.alarmMinute(this)
 
+        val savedMask = Prefs.alarmDaysMask(this)
+        dayChips.forEach { (chip, dayOfWeek) ->
+            chip.isChecked = (savedMask and (1 shl (dayOfWeek - Calendar.SUNDAY))) != 0
+        }
+
+        binding.seekVolume.progress = Prefs.wakeVolume(this)
+        binding.labelVolume.text = "Wake-up volume: ${Prefs.wakeVolume(this)}"
         binding.seekVolume.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
                 binding.labelVolume.text = "Wake-up volume: $progress"
@@ -127,12 +139,6 @@ class MainActivity : AppCompatActivity() {
         })
 
         binding.btnConnect.setOnClickListener { doConnect() }
-        binding.btnClaimActive.setOnClickListener {
-            Prefs.setActiveDevice(this, Prefs.deviceId(this), Prefs.deviceLabel())
-            refreshActiveDeviceStatus()
-            toast("This device will now fire the alarm")
-            thread { SettingsSync.push(this) }
-        }
         binding.btnSave.setOnClickListener { doSaveAndSchedule() }
         binding.btnRunNow.setOnClickListener { doRunNow() }
         binding.btnViewLog.setOnClickListener { showDebugLog() }
@@ -163,32 +169,6 @@ class MainActivity : AppCompatActivity() {
         })
 
         refreshAllStatuses()
-
-        thread {
-            SettingsSync.pullOrBootstrap(this)
-            runOnUiThread {
-                populateFieldsFromPrefs()
-                refreshAllStatuses()
-            }
-        }
-    }
-
-    @SuppressLint("SetTextI18n")
-    private fun populateFieldsFromPrefs() {
-        binding.inputTvIp.setText(Prefs.tvIp(this))
-        binding.inputTvMac.setText(Prefs.tvMac(this))
-        binding.inputPlaylistUri.setText(Prefs.playlistUri(this))
-        binding.inputSpotifyAppId.setText(Prefs.spotifyAppId(this))
-        binding.timePicker.hour = Prefs.alarmHour(this)
-        binding.timePicker.minute = Prefs.alarmMinute(this)
-
-        val savedMask = Prefs.alarmDaysMask(this)
-        dayChips.forEach { (chip, dayOfWeek) ->
-            chip.isChecked = (savedMask and (1 shl (dayOfWeek - Calendar.SUNDAY))) != 0
-        }
-
-        binding.seekVolume.progress = Prefs.wakeVolume(this)
-        binding.labelVolume.text = "Wake-up volume: ${Prefs.wakeVolume(this)}"
     }
 
     private fun refreshPlaylistStatus() {
@@ -262,32 +242,11 @@ class MainActivity : AppCompatActivity() {
         when {
             lastRunAt == 0L -> setStatus(binding.statusRun, "Not run yet", StatusKind.NEUTRAL)
             lastRunStatus == "success" -> setStatus(binding.statusRun, "\u2713 Last run succeeded \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.SUCCESS)
-            lastRunStatus == "fallback_success" -> setStatus(binding.statusRun, "\u2713 Backup run succeeded, active device didn't respond \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.SUCCESS)
-            lastRunStatus == "skipped" -> setStatus(binding.statusRun, "Skipped \u2014 not the active alarm device (${timeFmt.format(Date(lastRunAt))})", StatusKind.NEUTRAL)
             lastRunStatus == "unreachable" -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 TV unreachable (${timeFmt.format(Date(lastRunAt))})", StatusKind.ERROR)
-            lastRunStatus == "fallback_unreachable" -> setStatus(binding.statusRun, "\u2717 Backup attempt failed \u2014 TV unreachable (${timeFmt.format(Date(lastRunAt))})", StatusKind.ERROR)
-            lastRunStatus == "fallback_failed" -> setStatus(binding.statusRun, "\u2717 Backup attempt failed \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.ERROR)
             else -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.ERROR)
         }
 
         updateCountdown()
-        refreshActiveDeviceStatus()
-    }
-
-    private fun refreshActiveDeviceStatus() {
-        val myId = Prefs.deviceId(this)
-        val activeId = Prefs.activeDeviceId(this)
-        when {
-            activeId == null || activeId == myId -> {
-                setStatus(binding.statusActiveDevice, "\u2713 This device fires the alarm", StatusKind.SUCCESS)
-                binding.btnClaimActive.visibility = View.GONE
-            }
-            else -> {
-                val label = Prefs.activeDeviceLabel(this) ?: "another device"
-                setStatus(binding.statusActiveDevice, "Alarm fires from: $label", StatusKind.NEUTRAL)
-                binding.btnClaimActive.visibility = View.VISIBLE
-            }
-        }
     }
 
     @SuppressLint("SetTextI18n")
@@ -462,7 +421,6 @@ class MainActivity : AppCompatActivity() {
         AlarmScheduler.scheduleNext(this)
         Prefs.markScheduled(this)
         refreshAllStatuses()
-        thread { SettingsSync.push(this) }
         if (mac.isBlank()) {
             toast("Alarm scheduled \u2014 no MAC set, so this won't wake an already-off TV. Find the MAC in the TV's own Settings > Network menu and add it here when you can.")
         } else {
