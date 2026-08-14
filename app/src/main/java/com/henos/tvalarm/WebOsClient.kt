@@ -423,6 +423,81 @@ object WebOsClient {
         return success
     }
 
+    // ---- Stop -----------------------------------------------------------------
+
+    /** Blocking. Call from a background thread. Closes the given app on the TV, stopping playback. Returns true on success. */
+    fun stopPlayback(ip: String, clientKey: String, appId: String): Boolean {
+        DebugLog.section("STOP PLAYBACK ip=$ip appId=$appId")
+        for (endpoint in endpointsFor(ip)) {
+            if (stopPlaybackOverEndpoint(endpoint, clientKey, appId)) {
+                DebugLog.log(TAG, "stopPlayback: SUCCESS via ${endpoint.url}")
+                return true
+            }
+        }
+        DebugLog.log(TAG, "stopPlayback: FAILED over all endpoints")
+        return false
+    }
+
+    private fun stopPlaybackOverEndpoint(endpoint: Endpoint, clientKey: String, appId: String): Boolean {
+        DebugLog.log(TAG, "stopPlaybackOverEndpoint: trying ${endpoint.url}")
+        val client = clientFor(endpoint.secure)
+        val latch = CountDownLatch(1)
+        var success = false
+        val request = Request.Builder().url(endpoint.url).build()
+        val ws = try {
+            client.newWebSocket(request, object : WebSocketListener() {
+                var registered = false
+
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    val payload = JSONObject().apply {
+                        put("forcePairing", false)
+                        put("pairingType", "PROMPT")
+                        put("manifest", manifest())
+                        put("client-key", clientKey)
+                    }
+                    val msg = JSONObject().apply {
+                        put("type", "register")
+                        put("id", UUID.randomUUID().toString())
+                        put("payload", payload)
+                    }
+                    webSocket.send(msg.toString())
+                }
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    DebugLog.log(TAG, "${endpoint.url}: received: $text")
+                    val resp = JSONObject(text)
+                    val type = resp.optString("type")
+                    if (type == "registered" && !registered) {
+                        registered = true
+                        val closeMsg = JSONObject().apply {
+                            put("type", "request")
+                            put("id", UUID.randomUUID().toString())
+                            put("uri", "ssap://system.launcher/close")
+                            put("payload", JSONObject().put("id", appId))
+                        }
+                        webSocket.send(closeMsg.toString())
+                    } else if (type == "response" || type == "error") {
+                        success = type == "response"
+                        latch.countDown()
+                    }
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    DebugLog.log(TAG, "${endpoint.url}: onFailure - ${t.javaClass.simpleName}: ${t.message}")
+                    latch.countDown()
+                }
+            })
+        } catch (e: Exception) {
+            DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
+            return false
+        }
+        val completed = latch.await(10, TimeUnit.SECONDS)
+        if (!completed) DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for stopPlayback response")
+        ws.close(1000, null)
+        client.dispatcher.executorService.shutdown()
+        return success
+    }
+
     // ---- MAC address lookup ------------------------------------------------
 
     /** Blocking. Call from a background thread. Returns the TV's active MAC address, or null. */
