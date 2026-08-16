@@ -140,6 +140,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnConnect.setOnClickListener { doConnect() }
         binding.btnStop.setOnClickListener { doStop() }
+        binding.btnTurnOff.setOnClickListener { doTurnOff() }
         binding.btnSave.setOnClickListener { doSaveAndSchedule() }
         binding.btnRunNow.setOnClickListener { doRunNow() }
         binding.btnViewLog.setOnClickListener { showDebugLog() }
@@ -445,6 +446,24 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 binding.btnStop.isEnabled = true
                 toast(if (ok) "Stopped" else "Couldn't stop playback \u2014 is the TV on?")
+            }
+        }
+    }
+
+    private fun doTurnOff() {
+        DebugLog.section("USER TAPPED: Turn Off TV")
+        val ip = currentIp()
+        val clientKey = Prefs.clientKey(this)
+        if (ip.isBlank() || clientKey == null) {
+            toast("Connect to the TV first")
+            return
+        }
+        binding.btnTurnOff.isEnabled = false
+        thread {
+            val ok = WebOsClient.turnOffTv(ip, clientKey)
+            runOnUiThread {
+                binding.btnTurnOff.isEnabled = true
+                toast(if (ok) "TV turning off" else "Couldn't turn off the TV \u2014 is it on?")
             }
         }
     }
