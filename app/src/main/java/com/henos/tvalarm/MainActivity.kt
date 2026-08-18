@@ -138,6 +138,26 @@ class MainActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
         })
 
+        binding.switchAlarmEnabled.isChecked = Prefs.isAlarmEnabled(this)
+        binding.switchAlarmEnabled.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                if (Prefs.clientKey(this) == null || Prefs.playlistUri(this).isBlank()) {
+                    toast("Save your settings first")
+                    binding.switchAlarmEnabled.isChecked = false
+                    return@setOnCheckedChangeListener
+                }
+                Prefs.setAlarmEnabled(this, true)
+                AlarmScheduler.scheduleNext(this)
+                Prefs.markScheduled(this)
+                toast("Alarm enabled")
+            } else {
+                Prefs.setAlarmEnabled(this, false)
+                AlarmScheduler.cancel(this)
+                toast("Alarm disabled")
+            }
+            refreshAllStatuses()
+        }
+
         binding.btnConnect.setOnClickListener { doConnect() }
         binding.btnStop.setOnClickListener { doStop() }
         binding.btnTurnOff.setOnClickListener { doTurnOff() }
@@ -230,7 +250,9 @@ class MainActivity : AppCompatActivity() {
 
         refreshPlaylistStatus()
 
-        if (Prefs.isScheduled(this)) {
+        if (!Prefs.isAlarmEnabled(this)) {
+            setStatus(binding.statusSchedule, "Alarm disabled", StatusKind.NEUTRAL)
+        } else if (Prefs.isScheduled(this)) {
             val h = Prefs.alarmHour(this)
             val m = Prefs.alarmMinute(this)
             val days = formatDaysMask(Prefs.alarmDaysMask(this))
@@ -253,7 +275,7 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetTextI18n")
     private fun updateCountdown() {
-        if (!Prefs.isScheduled(this)) {
+        if (!Prefs.isAlarmEnabled(this) || !Prefs.isScheduled(this)) {
             binding.statusCountdown.text = ""
             return
         }
@@ -420,6 +442,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        Prefs.setAlarmEnabled(this, true)
+        binding.switchAlarmEnabled.isChecked = true
         AlarmScheduler.scheduleNext(this)
         Prefs.markScheduled(this)
         refreshAllStatuses()
