@@ -181,6 +181,14 @@
 
                 <TextView android:text="3 \u00b7 Schedule" style="@style/SectionTitle" />
 
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switchAlarmEnabled"
+                    android:text="Alarm enabled"
+                    android:checked="true"
+                    android:layout_marginBottom="4dp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+
                 <TimePicker
                     android:id="@+id/timePicker"
                     android:timePickerMode="spinner"
