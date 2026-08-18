@@ -54,4 +54,16 @@ object AlarmScheduler {
             true
         }
     }
+
+    /** Cancels the pending exact alarm, if any. Uses the identical PendingIntent used to schedule it. */
+    fun cancel(context: Context) {
+        DebugLog.log("AlarmScheduler", "cancel: cancelling pending exact alarm")
+        val intent = Intent(context, AlarmReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            context, REQUEST_CODE, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmManager.cancel(pendingIntent)
+    }
 }
