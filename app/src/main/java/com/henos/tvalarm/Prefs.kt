@@ -34,6 +34,10 @@ object Prefs {
     fun pairedAt(context: Context) = get(context).getLong("paired_at", 0L)
     fun scheduledAt(context: Context) = get(context).getLong("scheduled_at", 0L)
     fun isScheduled(context: Context) = get(context).getBoolean("is_scheduled", false)
+    fun isAlarmEnabled(context: Context) = get(context).getBoolean("alarm_enabled", true)
+    fun setAlarmEnabled(context: Context, enabled: Boolean) {
+        get(context).edit().putBoolean("alarm_enabled", enabled).apply()
+    }
     fun lastRunAt(context: Context) = get(context).getLong("last_run_at", 0L)
     fun lastRunStatus(context: Context) = get(context).getString("last_run_status", null) // "success" | "failed" | "unreachable"
     fun nextAlarmAt(context: Context) = get(context).getLong("next_alarm_at", 0L)
