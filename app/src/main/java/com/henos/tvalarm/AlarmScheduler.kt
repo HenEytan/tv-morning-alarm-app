@@ -10,60 +10,61 @@ object AlarmScheduler {
 
     private const val REQUEST_CODE = 1001
 
-    fun scheduleNext(context: Context) {
+    /** Arms the next exact alarm. Returns false if the OS refused (exact-alarm permission missing). */
+    fun scheduleNext(context: Context): Boolean {
         val hour = Prefs.alarmHour(context)
         val minute = Prefs.alarmMinute(context)
         val daysMask = Prefs.alarmDaysMask(context)
 
-        val now = Calendar.getInstance()
-        var next = Calendar.getInstance().apply {
+        // Treat anything within the next 60s as "already passed" so an alarm that fires a hair
+        // early can't re-arm for the same minute and ring twice.
+        val threshold = Calendar.getInstance().apply { add(Calendar.SECOND, 60) }
+        val next = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hour)
             set(Calendar.MINUTE, minute)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
-            if (before(now)) add(Calendar.DAY_OF_YEAR, 1)
+            if (before(threshold)) add(Calendar.DAY_OF_YEAR, 1)
         }
-        // Advance to the next day that's actually selected (up to a week out).
         var guard = 0
         while (daysMask != 0 && !Prefs.isDaySelected(context, next.get(Calendar.DAY_OF_WEEK)) && guard < 7) {
             next.add(Calendar.DAY_OF_YEAR, 1)
             guard++
         }
-        DebugLog.log("AlarmScheduler", "scheduleNext: next fire at ${next.time} (daysMask=$daysMask)")
-        Prefs.saveNextAlarmAt(context, next.timeInMillis)
 
-        val intent = Intent(context, AlarmReceiver::class.java)
-        val pendingIntent = PendingIntent.getBroadcast(
-            context, REQUEST_CODE, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        if (!canScheduleExact(context)) {
+            DebugLog.log("AlarmScheduler", "scheduleNext: exact alarm permission NOT granted - cannot arm")
+            return false
+        }
 
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarmManager.setExactAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP,
-            next.timeInMillis,
-            pendingIntent
-        )
+        return try {
+            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next.timeInMillis, pendingIntent(context))
+            Prefs.saveNextAlarmAt(context, next.timeInMillis)
+            DebugLog.log("AlarmScheduler", "scheduleNext: armed for ${next.time} (daysMask=$daysMask)")
+            true
+        } catch (e: SecurityException) {
+            DebugLog.log("AlarmScheduler", "scheduleNext: SecurityException - ${e.message}")
+            false
+        }
+    }
+
+    fun cancel(context: Context) {
+        DebugLog.log("AlarmScheduler", "cancel: cancelling pending exact alarm")
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmManager.cancel(pendingIntent(context))
     }
 
     fun canScheduleExact(context: Context): Boolean {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        return if (android.os.Build.VERSION.SDK_INT >= 31) {
-            alarmManager.canScheduleExactAlarms()
-        } else {
-            true
-        }
+        return if (android.os.Build.VERSION.SDK_INT >= 31) alarmManager.canScheduleExactAlarms() else true
     }
 
-    /** Cancels the pending exact alarm, if any. Uses the identical PendingIntent used to schedule it. */
-    fun cancel(context: Context) {
-        DebugLog.log("AlarmScheduler", "cancel: cancelling pending exact alarm")
+    private fun pendingIntent(context: Context): PendingIntent {
         val intent = Intent(context, AlarmReceiver::class.java)
-        val pendingIntent = PendingIntent.getBroadcast(
+        return PendingIntent.getBroadcast(
             context, REQUEST_CODE, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarmManager.cancel(pendingIntent)
     }
 }
