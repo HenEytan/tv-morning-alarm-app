@@ -16,15 +16,19 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         DebugLog.appContext = context.applicationContext
         DebugLog.section("BOOT/UPDATE RECEIVED: ${intent.action}")
-        if (intent.action in relevantActions) {
-            if (Prefs.tvIp(context).isNotBlank() && Prefs.clientKey(context) != null) {
-                AlarmScheduler.scheduleNext(context)
-                DebugLog.log("BootReceiver", "alarm re-armed for ${Prefs.alarmHour(context)}:${Prefs.alarmMinute(context)}")
-            } else {
-                DebugLog.log("BootReceiver", "skipped re-arming - not configured/paired yet")
+        if (intent.action !in relevantActions) {
+            DebugLog.log("BootReceiver", "ignored action")
+            return
+        }
+        val configured = Prefs.tvIp(context).isNotBlank() && Prefs.clientKey(context) != null
+        when {
+            !configured -> DebugLog.log("BootReceiver", "skipped re-arming - not configured/paired yet")
+            !Prefs.isScheduled(context) -> DebugLog.log("BootReceiver", "skipped re-arming - never scheduled")
+            !Prefs.isAlarmEnabled(context) -> DebugLog.log("BootReceiver", "skipped re-arming - alarm is disabled")
+            else -> {
+                val ok = AlarmScheduler.scheduleNext(context)
+                DebugLog.log("BootReceiver", if (ok) "alarm re-armed for ${Prefs.alarmHour(context)}:${Prefs.alarmMinute(context)}" else "could not re-arm (exact alarm permission missing?)")
             }
-        } else {
-            DebugLog.log("BootReceiver", "ignored action (not in relevant list)")
         }
     }
 }
