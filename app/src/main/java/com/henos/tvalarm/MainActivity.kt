@@ -21,7 +21,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.google.android.material.chip.Chip
 import com.henos.tvalarm.databinding.ActivityMainBinding
 import java.text.SimpleDateFormat
@@ -146,6 +148,12 @@ class MainActivity : AppCompatActivity() {
                     binding.switchAlarmEnabled.isChecked = false
                     return@setOnCheckedChangeListener
                 }
+                if (!AlarmScheduler.canScheduleExact(this)) {
+                    toast("Grant \"Alarms & reminders\" permission first")
+                    binding.switchAlarmEnabled.isChecked = false
+                    startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
+                    return@setOnCheckedChangeListener
+                }
                 Prefs.setAlarmEnabled(this, true)
                 AlarmScheduler.scheduleNext(this)
                 Prefs.markScheduled(this)
@@ -267,6 +275,7 @@ class MainActivity : AppCompatActivity() {
             lastRunAt == 0L -> setStatus(binding.statusRun, "Not run yet", StatusKind.NEUTRAL)
             lastRunStatus == "success" -> setStatus(binding.statusRun, "\u2713 Last run succeeded \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.SUCCESS)
             lastRunStatus == "unreachable" -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 TV unreachable (${timeFmt.format(Date(lastRunAt))})", StatusKind.ERROR)
+            lastRunStatus == "unpaired" -> setStatus(binding.statusRun, "\u2717 TV no longer recognizes this app \u2014 tap Connect to TV again (${timeFmt.format(Date(lastRunAt))})", StatusKind.ERROR)
             else -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.ERROR)
         }
 
@@ -466,10 +475,17 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnStop.isEnabled = false
         thread {
-            val ok = WebOsClient.stopPlayback(ip, clientKey, appId)
+            val r = WebOsClient.stopPlayback(ip, clientKey, appId)
             runOnUiThread {
                 binding.btnStop.isEnabled = true
-                toast(if (ok) "Stopped" else "Couldn't stop playback \u2014 is the TV on?")
+                toast(
+                    when (r) {
+                        WebOsClient.RequestResult.OK -> "Stopped"
+                        WebOsClient.RequestResult.UNPAIRED -> "TV no longer recognizes this app \u2014 tap Connect to TV again"
+                        WebOsClient.RequestResult.UNREACHABLE -> "Can't reach the TV \u2014 is it on?"
+                        WebOsClient.RequestResult.ERROR -> "TV refused: ${WebOsClient.lastCommandError ?: "unknown error"}"
+                    }
+                )
             }
         }
     }
@@ -484,10 +500,17 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnTurnOff.isEnabled = false
         thread {
-            val ok = WebOsClient.turnOffTv(ip, clientKey)
+            val r = WebOsClient.turnOffTv(ip, clientKey)
             runOnUiThread {
                 binding.btnTurnOff.isEnabled = true
-                toast(if (ok) "TV turning off" else "Couldn't turn off the TV \u2014 is it on?")
+                toast(
+                    when (r) {
+                        WebOsClient.RequestResult.OK -> "TV turning off"
+                        WebOsClient.RequestResult.UNPAIRED -> "TV no longer recognizes this app \u2014 tap Connect to TV again"
+                        WebOsClient.RequestResult.UNREACHABLE -> "Can't reach the TV \u2014 is it already off?"
+                        WebOsClient.RequestResult.ERROR -> "TV refused: ${WebOsClient.lastCommandError ?: "unknown error"}"
+                    }
+                )
             }
         }
     }
@@ -535,7 +558,10 @@ class MainActivity : AppCompatActivity() {
         setStatus(binding.statusRun, "Running\u2026", StatusKind.NEUTRAL)
         binding.btnRunNow.isEnabled = false
 
-        val request = OneTimeWorkRequestBuilder<TvAlarmWorker>().build()
+        val request = OneTimeWorkRequestBuilder<TvAlarmWorker>()
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .setInputData(workDataOf(TvAlarmWorker.INPUT_MANUAL to true))
+            .build()
         val wm = WorkManager.getInstance(this)
         wm.enqueue(request)
         wm.getWorkInfoByIdLiveData(request.id).observe(this) { info ->
