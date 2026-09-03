@@ -266,314 +266,174 @@ object WebOsClient {
         return result
     }
 
-    // ---- Launch app -------------------------------------------------------
+    // ---- Generic authenticated SSAP request --------------------------------
 
-    /** Blocking. Call from a background thread. Returns true on success. */
-    fun launchApp(ip: String, clientKey: String, appId: String, contentUri: String): Boolean {
+    enum class RequestResult { OK, ERROR, UNPAIRED, UNREACHABLE }
+
+    /** Human-readable detail for the most recent command failure, if any. */
+    @Volatile
+    var lastCommandError: String? = null
+        private set
+
+    /**
+     * Opens a socket, registers with the stored client-key, sends ONE request and
+     * returns how it went. Tries ws:// then wss://.
+     *
+     * Important: a "response" that arrives BEFORE we are "registered" is the TV asking
+     * us to pair again (our key is no longer trusted). Older code treated that as a
+     * successful command, which silently did nothing. That case is now UNPAIRED.
+     *
+     * [successOnDropAfterSend]: for commands like turnOff, the TV often drops the socket
+     * right after accepting and never sends a response frame; treat that as success.
+     */
+    private fun sendRequest(
+        ip: String,
+        clientKey: String,
+        uri: String,
+        payload: JSONObject,
+        timeoutSeconds: Long = 15,
+        successOnDropAfterSend: Boolean = false
+    ): RequestResult {
+        lastCommandError = null
+        var lastResult = RequestResult.UNREACHABLE
+        for (endpoint in endpointsFor(ip)) {
+            val r = sendRequestOverEndpoint(endpoint, clientKey, uri, payload, timeoutSeconds, successOnDropAfterSend)
+            DebugLog.log(TAG, "sendRequest $uri via ${endpoint.url}: $r")
+            if (r == RequestResult.OK) return r
+            // UNPAIRED / ERROR are definitive answers from the TV - no point trying the other port.
+            if (r == RequestResult.UNPAIRED || r == RequestResult.ERROR) return r
+            lastResult = r
+        }
+        return lastResult
+    }
+
+    private fun sendRequestOverEndpoint(
+        endpoint: Endpoint,
+        clientKey: String,
+        uri: String,
+        payload: JSONObject,
+        timeoutSeconds: Long,
+        successOnDropAfterSend: Boolean
+    ): RequestResult {
+        val client = clientFor(endpoint.secure)
+        val latch = CountDownLatch(1)
+        var result = RequestResult.UNREACHABLE
+        val request = Request.Builder().url(endpoint.url).build()
+        val ws = try {
+            client.newWebSocket(request, object : WebSocketListener() {
+                var registered = false
+                var sent = false
+
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    val reg = JSONObject().apply {
+                        put("forcePairing", false)
+                        put("pairingType", "PROMPT")
+                        put("manifest", manifest())
+                        put("client-key", clientKey)
+                    }
+                    val msg = JSONObject().apply {
+                        put("type", "register")
+                        put("id", UUID.randomUUID().toString())
+                        put("payload", reg)
+                    }
+                    webSocket.send(msg.toString())
+                }
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    DebugLog.log(TAG, "${endpoint.url}: received: $text")
+                    val resp = try { JSONObject(text) } catch (e: Exception) { return }
+                    val type = resp.optString("type")
+                    when {
+                        type == "registered" && !registered -> {
+                            registered = true
+                            val req = JSONObject().apply {
+                                put("type", "request")
+                                put("id", UUID.randomUUID().toString())
+                                put("uri", uri)
+                                put("payload", payload)
+                            }
+                            sent = true
+                            webSocket.send(req.toString())
+                        }
+                        !registered && type == "response" -> {
+                            // Pairing prompt instead of "registered": our key is not trusted any more.
+                            lastCommandError = "TV no longer recognizes this app - tap Connect to TV to pair again"
+                            result = RequestResult.UNPAIRED
+                            latch.countDown()
+                        }
+                        !registered && type == "error" -> {
+                            lastCommandError = "${endpoint.url}: ${resp.optString("error", text)}"
+                            result = RequestResult.ERROR
+                            latch.countDown()
+                        }
+                        registered && type == "response" -> {
+                            val ok = resp.optJSONObject("payload")?.optBoolean("returnValue", true) ?: true
+                            if (!ok) lastCommandError = "${endpoint.url}: ${resp.optJSONObject("payload")?.optString("errorText") ?: text}"
+                            result = if (ok) RequestResult.OK else RequestResult.ERROR
+                            latch.countDown()
+                        }
+                        registered && type == "error" -> {
+                            lastCommandError = "${endpoint.url}: ${resp.optString("error", text)}"
+                            result = RequestResult.ERROR
+                            latch.countDown()
+                        }
+                    }
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    DebugLog.log(TAG, "${endpoint.url}: onFailure - ${t.javaClass.simpleName}: ${t.message}")
+                    if (sent && successOnDropAfterSend) {
+                        result = RequestResult.OK
+                    } else if (result == RequestResult.UNREACHABLE) {
+                        lastCommandError = "${endpoint.url}: ${t.javaClass.simpleName}: ${t.message}"
+                    }
+                    latch.countDown()
+                }
+            })
+        } catch (e: Exception) {
+            DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
+            lastCommandError = "${endpoint.url}: ${e.message}"
+            return RequestResult.UNREACHABLE
+        }
+        val completed = latch.await(timeoutSeconds, TimeUnit.SECONDS)
+        if (!completed) {
+            DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for $uri response")
+            lastCommandError = "${endpoint.url}: timed out waiting for the TV"
+        }
+        ws.close(1000, null)
+        client.dispatcher.executorService.shutdown()
+        return result
+    }
+
+    // ---- Commands -----------------------------------------------------------
+
+    /** Blocking. Launches [appId] with the given content URI. */
+    fun launchApp(ip: String, clientKey: String, appId: String, contentUri: String): RequestResult {
         DebugLog.section("LAUNCH APP ip=$ip appId=$appId contentUri=$contentUri")
-        for (endpoint in endpointsFor(ip)) {
-            if (launchAppOverEndpoint(endpoint, clientKey, appId, contentUri)) {
-                DebugLog.log(TAG, "launchApp: SUCCESS via ${endpoint.url}")
-                return true
-            }
+        val payload = JSONObject().apply {
+            put("id", appId)
+            put("contentId", contentUri)
+            put("params", JSONObject().put("contentTarget", contentUri))
         }
-        DebugLog.log(TAG, "launchApp: FAILED over all endpoints")
-        return false
+        return sendRequest(ip, clientKey, "ssap://system.launcher/launch", payload, timeoutSeconds = 20)
     }
 
-    private fun launchAppOverEndpoint(endpoint: Endpoint, clientKey: String, appId: String, contentUri: String): Boolean {
-        DebugLog.log(TAG, "launchAppOverEndpoint: trying ${endpoint.url}")
-        val client = clientFor(endpoint.secure)
-        val latch = CountDownLatch(1)
-        var success = false
-        val request = Request.Builder().url(endpoint.url).build()
-        val ws = try {
-            client.newWebSocket(request, object : WebSocketListener() {
-                var registered = false
-
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    DebugLog.log(TAG, "${endpoint.url}: onOpen (HTTP ${response.code})")
-                    val payload = JSONObject().apply {
-                        put("forcePairing", false)
-                        put("pairingType", "PROMPT")
-                        put("manifest", manifest())
-                        put("client-key", clientKey)
-                    }
-                    val msg = JSONObject().apply {
-                        put("type", "register")
-                        put("id", UUID.randomUUID().toString())
-                        put("payload", payload)
-                    }
-                    webSocket.send(msg.toString())
-                }
-
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    DebugLog.log(TAG, "${endpoint.url}: received: $text")
-                    val resp = JSONObject(text)
-                    val type = resp.optString("type")
-                    if (type == "registered" && !registered) {
-                        registered = true
-                        val launchPayload = JSONObject().apply {
-                            put("id", appId)
-                            put("contentId", contentUri)
-                            put("params", JSONObject().put("contentTarget", contentUri))
-                        }
-                        val launchMsg = JSONObject().apply {
-                            put("type", "request")
-                            put("id", UUID.randomUUID().toString())
-                            put("uri", "ssap://system.launcher/launch")
-                            put("payload", launchPayload)
-                        }
-                        DebugLog.log(TAG, "${endpoint.url}: registered OK, sending launch request")
-                        webSocket.send(launchMsg.toString())
-                    } else if (type == "response" || type == "error") {
-                        success = type == "response"
-                        latch.countDown()
-                    }
-                }
-
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    DebugLog.log(TAG, "${endpoint.url}: onFailure - ${t.javaClass.simpleName}: ${t.message}")
-                    latch.countDown()
-                }
-            })
-        } catch (e: Exception) {
-            DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
-            return false
-        }
-        val completed = latch.await(20, TimeUnit.SECONDS)
-        if (!completed) DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for launch response")
-        ws.close(1000, null)
-        client.dispatcher.executorService.shutdown()
-        return success
-    }
-
-    // ---- Volume -------------------------------------------------------------
-
-    /** Blocking. Call from a background thread. Sets the TV's volume (0-100). Returns true on success. */
-    fun setVolume(ip: String, clientKey: String, volume: Int): Boolean {
+    /** Blocking. Sets the TV volume (0-100). */
+    fun setVolume(ip: String, clientKey: String, volume: Int): RequestResult {
         DebugLog.section("SET VOLUME ip=$ip volume=$volume")
-        for (endpoint in endpointsFor(ip)) {
-            if (setVolumeOverEndpoint(endpoint, clientKey, volume)) {
-                DebugLog.log(TAG, "setVolume: SUCCESS via ${endpoint.url}")
-                return true
-            }
-        }
-        DebugLog.log(TAG, "setVolume: FAILED over all endpoints")
-        return false
+        return sendRequest(ip, clientKey, "ssap://audio/setVolume", JSONObject().put("volume", volume), timeoutSeconds = 10)
     }
 
-    private fun setVolumeOverEndpoint(endpoint: Endpoint, clientKey: String, volume: Int): Boolean {
-        DebugLog.log(TAG, "setVolumeOverEndpoint: trying ${endpoint.url}")
-        val client = clientFor(endpoint.secure)
-        val latch = CountDownLatch(1)
-        var success = false
-        val request = Request.Builder().url(endpoint.url).build()
-        val ws = try {
-            client.newWebSocket(request, object : WebSocketListener() {
-                var registered = false
-
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    val payload = JSONObject().apply {
-                        put("forcePairing", false)
-                        put("pairingType", "PROMPT")
-                        put("manifest", manifest())
-                        put("client-key", clientKey)
-                    }
-                    val msg = JSONObject().apply {
-                        put("type", "register")
-                        put("id", UUID.randomUUID().toString())
-                        put("payload", payload)
-                    }
-                    webSocket.send(msg.toString())
-                }
-
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    DebugLog.log(TAG, "${endpoint.url}: received: $text")
-                    val resp = JSONObject(text)
-                    val type = resp.optString("type")
-                    if (type == "registered" && !registered) {
-                        registered = true
-                        val volumeMsg = JSONObject().apply {
-                            put("type", "request")
-                            put("id", UUID.randomUUID().toString())
-                            put("uri", "ssap://audio/setVolume")
-                            put("payload", JSONObject().put("volume", volume))
-                        }
-                        webSocket.send(volumeMsg.toString())
-                    } else if (type == "response" || type == "error") {
-                        success = type == "response"
-                        latch.countDown()
-                    }
-                }
-
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    DebugLog.log(TAG, "${endpoint.url}: onFailure - ${t.javaClass.simpleName}: ${t.message}")
-                    latch.countDown()
-                }
-            })
-        } catch (e: Exception) {
-            DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
-            return false
-        }
-        val completed = latch.await(10, TimeUnit.SECONDS)
-        if (!completed) DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for setVolume response")
-        ws.close(1000, null)
-        client.dispatcher.executorService.shutdown()
-        return success
-    }
-
-    // ---- Stop -----------------------------------------------------------------
-
-    /** Blocking. Call from a background thread. Closes the given app on the TV, stopping playback. Returns true on success. */
-    fun stopPlayback(ip: String, clientKey: String, appId: String): Boolean {
+    /** Blocking. Closes [appId] on the TV, which stops playback. */
+    fun stopPlayback(ip: String, clientKey: String, appId: String): RequestResult {
         DebugLog.section("STOP PLAYBACK ip=$ip appId=$appId")
-        for (endpoint in endpointsFor(ip)) {
-            if (stopPlaybackOverEndpoint(endpoint, clientKey, appId)) {
-                DebugLog.log(TAG, "stopPlayback: SUCCESS via ${endpoint.url}")
-                return true
-            }
-        }
-        DebugLog.log(TAG, "stopPlayback: FAILED over all endpoints")
-        return false
+        return sendRequest(ip, clientKey, "ssap://system.launcher/close", JSONObject().put("id", appId), timeoutSeconds = 10)
     }
 
-    private fun stopPlaybackOverEndpoint(endpoint: Endpoint, clientKey: String, appId: String): Boolean {
-        DebugLog.log(TAG, "stopPlaybackOverEndpoint: trying ${endpoint.url}")
-        val client = clientFor(endpoint.secure)
-        val latch = CountDownLatch(1)
-        var success = false
-        val request = Request.Builder().url(endpoint.url).build()
-        val ws = try {
-            client.newWebSocket(request, object : WebSocketListener() {
-                var registered = false
-
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    val payload = JSONObject().apply {
-                        put("forcePairing", false)
-                        put("pairingType", "PROMPT")
-                        put("manifest", manifest())
-                        put("client-key", clientKey)
-                    }
-                    val msg = JSONObject().apply {
-                        put("type", "register")
-                        put("id", UUID.randomUUID().toString())
-                        put("payload", payload)
-                    }
-                    webSocket.send(msg.toString())
-                }
-
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    DebugLog.log(TAG, "${endpoint.url}: received: $text")
-                    val resp = JSONObject(text)
-                    val type = resp.optString("type")
-                    if (type == "registered" && !registered) {
-                        registered = true
-                        val closeMsg = JSONObject().apply {
-                            put("type", "request")
-                            put("id", UUID.randomUUID().toString())
-                            put("uri", "ssap://system.launcher/close")
-                            put("payload", JSONObject().put("id", appId))
-                        }
-                        webSocket.send(closeMsg.toString())
-                    } else if (type == "response" || type == "error") {
-                        success = type == "response"
-                        latch.countDown()
-                    }
-                }
-
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    DebugLog.log(TAG, "${endpoint.url}: onFailure - ${t.javaClass.simpleName}: ${t.message}")
-                    latch.countDown()
-                }
-            })
-        } catch (e: Exception) {
-            DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
-            return false
-        }
-        val completed = latch.await(10, TimeUnit.SECONDS)
-        if (!completed) DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for stopPlayback response")
-        ws.close(1000, null)
-        client.dispatcher.executorService.shutdown()
-        return success
-    }
-
-    // ---- Turn off TV ------------------------------------------------------
-
-    /** Blocking. Call from a background thread. Powers the TV off entirely. Returns true on success. */
-    fun turnOffTv(ip: String, clientKey: String): Boolean {
+    /** Blocking. Powers the TV off. */
+    fun turnOffTv(ip: String, clientKey: String): RequestResult {
         DebugLog.section("TURN OFF TV ip=$ip")
-        for (endpoint in endpointsFor(ip)) {
-            if (turnOffOverEndpoint(endpoint, clientKey)) {
-                DebugLog.log(TAG, "turnOffTv: SUCCESS via ${endpoint.url}")
-                return true
-            }
-        }
-        DebugLog.log(TAG, "turnOffTv: FAILED over all endpoints")
-        return false
-    }
-
-    private fun turnOffOverEndpoint(endpoint: Endpoint, clientKey: String): Boolean {
-        DebugLog.log(TAG, "turnOffOverEndpoint: trying ${endpoint.url}")
-        val client = clientFor(endpoint.secure)
-        val latch = CountDownLatch(1)
-        var success = false
-        val request = Request.Builder().url(endpoint.url).build()
-        val ws = try {
-            client.newWebSocket(request, object : WebSocketListener() {
-                var registered = false
-
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    val payload = JSONObject().apply {
-                        put("forcePairing", false)
-                        put("pairingType", "PROMPT")
-                        put("manifest", manifest())
-                        put("client-key", clientKey)
-                    }
-                    val msg = JSONObject().apply {
-                        put("type", "register")
-                        put("id", UUID.randomUUID().toString())
-                        put("payload", payload)
-                    }
-                    webSocket.send(msg.toString())
-                }
-
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    DebugLog.log(TAG, "${endpoint.url}: received: $text")
-                    val resp = JSONObject(text)
-                    val type = resp.optString("type")
-                    if (type == "registered" && !registered) {
-                        registered = true
-                        val offMsg = JSONObject().apply {
-                            put("type", "request")
-                            put("id", UUID.randomUUID().toString())
-                            put("uri", "ssap://system/turnOff")
-                            put("payload", JSONObject())
-                        }
-                        webSocket.send(offMsg.toString())
-                    } else if (type == "response" || type == "error") {
-                        success = type == "response"
-                        latch.countDown()
-                    }
-                }
-
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    DebugLog.log(TAG, "${endpoint.url}: onFailure - ${t.javaClass.simpleName}: ${t.message}")
-                    // Many TVs close the socket immediately after accepting turnOff, before a
-                    // response frame arrives - treat that as a likely success rather than a failure.
-                    success = true
-                    latch.countDown()
-                }
-            })
-        } catch (e: Exception) {
-            DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
-            return false
-        }
-        val completed = latch.await(10, TimeUnit.SECONDS)
-        if (!completed) DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for turnOff response")
-        ws.close(1000, null)
-        client.dispatcher.executorService.shutdown()
-        return success
+        return sendRequest(ip, clientKey, "ssap://system/turnOff", JSONObject(), timeoutSeconds = 10, successOnDropAfterSend = true)
     }
 
     // ---- MAC address lookup ------------------------------------------------
