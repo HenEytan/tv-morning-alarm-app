@@ -323,6 +323,16 @@
             android:id="@+id/btnViewLog"
             android:text="View Debug Log"
             style="@style/TextButtonMuted"
+            android:layout_marginBottom="4dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:id="@+id/textVersion"
+            android:text=""
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
             android:layout_marginBottom="16dp"
             android:layout_gravity="center_horizontal"
             android:layout_width="wrap_content"

@@ -7,12 +7,14 @@ android {
     namespace = "com.henos.tvalarm"
     compileSdk = 34
 
+    def buildNumber = project.hasProperty("buildNumber") ? (project.property("buildNumber") as Integer) : 1
+
     defaultConfig {
         applicationId = "com.henos.tvalarm"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = buildNumber
+        versionName = "1.0.$buildNumber"
     }
 
     buildTypes {
@@ -32,6 +34,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 
