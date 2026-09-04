@@ -181,7 +181,7 @@
 
                 <TextView android:text="3 \u00b7 Schedule" style="@style/SectionTitle" />
 
-                <com.google.android.material.materialswitch.MaterialSwitch
+                <com.google.android.material.switchmaterial.SwitchMaterial
                     android:id="@+id/switchAlarmEnabled"
                     android:text="Alarm enabled"
                     android:checked="true"
