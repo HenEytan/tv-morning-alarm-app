@@ -188,6 +188,8 @@
                     android:showText="false"
                     android:textOn=""
                     android:textOff=""
+                    app:thumbTint="@color/switch_thumb_tint"
+                    app:trackTint="@color/switch_track_tint"
                     android:layout_marginBottom="4dp"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content" />
