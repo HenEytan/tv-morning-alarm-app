@@ -1,5 +1,6 @@
 package com.henos.tvalarm
 
+import android.os.SystemClock
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -10,7 +11,7 @@ import org.json.JSONObject
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
-import java.net.Socket
+import java.net.NetworkInterface
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.UUID
@@ -49,38 +50,104 @@ object WebOsClient {
 
     // ---- Wake on LAN --------------------------------------------------
 
-    fun sendWol(mac: String) {
-        DebugLog.log(TAG, "sendWol: sending magic packet to MAC=$mac")
+    /**
+     * Sends the Wake-on-LAN magic packet. [tvIp] is optional but strongly preferred:
+     * it lets us derive the TV's own subnet broadcast address and unicast the packet
+     * straight at the TV.
+     *
+     * Why more than one target: sending to the global broadcast address
+     * 255.255.255.255 is refused outright on some Android builds - the debug log
+     * recorded "sendto failed: EPERM (Operation not permitted)" - and the old code
+     * treated that one failure as "no wake packet at all", so the TV never woke and
+     * the run ended in a 90s unreachable timeout. Subnet broadcasts (192.168.1.255)
+     * are not blocked, so fan the packet out across every broadcast address the
+     * device actually has, plus a unicast to the TV, on both ports WoL listens on.
+     */
+    fun sendWol(mac: String, tvIp: String? = null) {
+        val payload = magicPacket(mac)
+        if (payload == null) {
+            DebugLog.log(TAG, "sendWol: FAILED - '$mac' is not a valid MAC address")
+            return
+        }
+        val targets = wolTargets(tvIp)
+        DebugLog.log(TAG, "sendWol: sending magic packet for MAC=$mac to ${targets.joinToString { it.hostAddress ?: it.toString() }}")
+        var delivered = 0
+        var lastError: String? = null
         try {
-            val macBytes = mac.replace(":", "").replace("-", "")
-                .chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-            val bytes = ByteArray(6) { 0xFF.toByte() } + macBytes.copyOf(6).let { m ->
-                ByteArray(16 * 6).also { buf ->
-                    for (i in 0 until 16) m.copyInto(buf, i * 6)
-                }
-            }
             DatagramSocket().use { socket ->
                 socket.broadcast = true
-                val packet = DatagramPacket(bytes, bytes.size, InetAddress.getByName("255.255.255.255"), 9)
-                socket.send(packet)
+                TvNetwork.bind(socket)
+                for (target in targets) {
+                    for (port in intArrayOf(9, 7)) {
+                        try {
+                            socket.send(DatagramPacket(payload, payload.size, target, port))
+                            delivered++
+                        } catch (e: Exception) {
+                            lastError = "${target.hostAddress}:$port ${e.javaClass.simpleName}: ${e.message}"
+                        }
+                    }
+                }
             }
-            DebugLog.log(TAG, "sendWol: packet sent OK")
         } catch (e: Exception) {
-            DebugLog.log(TAG, "sendWol: FAILED - ${e.javaClass.simpleName}: ${e.message}")
+            lastError = "${e.javaClass.simpleName}: ${e.message}"
         }
+        if (delivered > 0) {
+            DebugLog.log(TAG, "sendWol: packet sent OK ($delivered of ${targets.size * 2} target/port combinations accepted)")
+        } else {
+            DebugLog.log(TAG, "sendWol: FAILED - no target accepted the packet (last error: $lastError)")
+        }
+    }
+
+    /** 6 bytes of 0xFF followed by the MAC repeated 16 times, or null if [mac] can't be parsed. */
+    private fun magicPacket(mac: String): ByteArray? {
+        val hex = mac.replace(":", "").replace("-", "").trim()
+        if (!Regex("^[0-9A-Fa-f]{12}$").matches(hex)) return null
+        val macBytes = hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        return ByteArray(6) { 0xFF.toByte() } + ByteArray(16 * 6).also { buf ->
+            for (i in 0 until 16) macBytes.copyInto(buf, i * 6)
+        }
+    }
+
+    /** Every address worth aiming a magic packet at, most likely to work first. */
+    private fun wolTargets(tvIp: String?): List<InetAddress> {
+        val targets = LinkedHashSet<InetAddress>()
+        // The TV's own subnet broadcast (192.168.1.189 -> 192.168.1.255): the address
+        // a TV sitting in standby is listening on, and never EPERM-blocked.
+        if (!tvIp.isNullOrBlank()) {
+            runCatching { InetAddress.getByName(tvIp.substringBeforeLast('.') + ".255") }
+                .getOrNull()?.let { targets.add(it) }
+        }
+        // Broadcast address of every live interface, which also covers non-/24 LANs.
+        runCatching {
+            NetworkInterface.getNetworkInterfaces().toList()
+                .filter { !it.isLoopback && it.isUp }
+                .flatMap { it.interfaceAddresses }
+                .mapNotNull { it.broadcast }
+                .forEach { targets.add(it) }
+        }
+        // Unicast: still works while the router has the TV's ARP entry cached.
+        if (!tvIp.isNullOrBlank()) {
+            runCatching { InetAddress.getByName(tvIp) }.getOrNull()?.let { targets.add(it) }
+        }
+        // Global broadcast last: blocked on some builds, the only one that works on others.
+        runCatching { InetAddress.getByName("255.255.255.255") }.getOrNull()?.let { targets.add(it) }
+        return targets.toList()
     }
 
     // ---- Reachability ---------------------------------------------------
 
     fun waitForTv(ip: String, timeoutMs: Long): Boolean {
         DebugLog.log(TAG, "waitForTv: polling $ip ports [3000, 3001] for up to ${timeoutMs}ms")
-        val deadline = System.currentTimeMillis() + timeoutMs
+        // elapsedRealtime, not currentTimeMillis: an NTP correction or a DST change
+        // would otherwise move the deadline underneath us and burn the whole budget
+        // in a single iteration.
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
         var attempt = 0
-        while (System.currentTimeMillis() < deadline) {
+        while (SystemClock.elapsedRealtime() < deadline) {
             attempt++
             for (port in listOf(3000, 3001)) {
                 try {
-                    Socket().use { s ->
+                    TvNetwork.newSocket().use { s ->
                         s.connect(java.net.InetSocketAddress(ip, port), 2000)
                         DebugLog.log(TAG, "waitForTv: attempt $attempt - port $port is OPEN")
                         return true
@@ -88,8 +155,11 @@ object WebOsClient {
                 } catch (e: Exception) {
                     DebugLog.log(TAG, "waitForTv: attempt $attempt - port $port closed/unreachable (${e.javaClass.simpleName}: ${e.message})")
                 }
+                if (SystemClock.elapsedRealtime() >= deadline) break
             }
-            Thread.sleep(1500)
+            val remaining = deadline - SystemClock.elapsedRealtime()
+            if (remaining <= 0) break
+            Thread.sleep(minOf(1500L, remaining))
         }
         DebugLog.log(TAG, "waitForTv: TIMED OUT after ${timeoutMs}ms - neither port 3000 nor 3001 opened")
         return false
@@ -97,7 +167,36 @@ object WebOsClient {
 
     // ---- TLS client that trusts the TV's self-signed certificate --------
 
-    private fun trustAllClient(): OkHttpClient {
+    /**
+     * How long OkHttp may spend on the TCP/TLS handshake. This has to stay comfortably
+     * below every latch timeout below. OkHttp's default is 10s, which is exactly the
+     * latch timeout setVolume used, so the latch expired at the same instant the
+     * connect did: we logged a misleading "TIMEOUT waiting for <uri> response", moved
+     * on to the next endpoint while the first socket was still connecting, and its
+     * onFailure then landed ten seconds later in the middle of an unrelated section
+     * of the log.
+     */
+    private const val CONNECT_TIMEOUT_SECONDS = 5L
+
+    // One shared client, and therefore one shared connection pool and dispatcher, for
+    // the whole app. The old code built a fresh OkHttpClient for every single request
+    // and then called dispatcher.executorService.shutdown() on it, which leaked a
+    // thread pool per call while leaving the sockets themselves alive to fire
+    // callbacks long after the request they belonged to had given up.
+    private val plainClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
+            // This bounds the HTTP upgrade handshake only, so it is safe to keep short
+            // even though the pairing prompt can sit idle on the TV screen for a
+            // minute: OkHttp sets the socket timeout to 0 once a connection is
+            // upgraded to a WebSocket, so an established control socket is never
+            // subject to it.
+            .readTimeout(10, TimeUnit.SECONDS)
+            .build()
+    }
+
+    private val secureClient: OkHttpClient by lazy {
         val trustAll = object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
             override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
@@ -105,13 +204,32 @@ object WebOsClient {
         }
         val sslContext = SSLContext.getInstance("TLS")
         sslContext.init(null, arrayOf(trustAll), SecureRandom())
-        return OkHttpClient.Builder()
+        plainClient.newBuilder()
             .sslSocketFactory(sslContext.socketFactory, trustAll)
             .hostnameVerifier { _, _ -> true }
             .build()
     }
 
-    private fun clientFor(secure: Boolean) = if (secure) trustAllClient() else OkHttpClient()
+    /**
+     * newBuilder() shares the connection pool and dispatcher with [plainClient], so
+     * pinning the socket to Wi-Fi costs nothing. Never shut the returned client down:
+     * its executor is shared.
+     */
+    private fun clientFor(secure: Boolean): OkHttpClient {
+        val base = if (secure) secureClient else plainClient
+        val wifi = TvNetwork.socketFactory() ?: return base
+        return base.newBuilder().socketFactory(wifi).build()
+    }
+
+    /**
+     * Tears a WebSocket down for good. close() only queues a close frame and leaves the
+     * socket - and its callbacks - alive if the TV never answers, which is how orphaned
+     * sockets from a timed-out request ended up logging onFailure minutes later. cancel()
+     * actually kills it.
+     */
+    private fun release(ws: WebSocket, graceful: Boolean) {
+        if (graceful) ws.close(1000, null) else ws.cancel()
+    }
 
     // ---- Device identity --------------------------------------------------
     // A unique-per-install serial, instead of the widely-shared public test
@@ -261,8 +379,7 @@ object WebOsClient {
             lastPairError = "${endpoint.url}: timed out after 90s \u2014 the TV never sent a final response. If no prompt appeared on screen at all, check the TV for an \"LG Connect Apps\" / \"Mobile TV On\" style setting, or a list of paired/blocked devices that may need clearing."
             DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for registered/error response")
         }
-        ws.close(1000, null)
-        client.dispatcher.executorService.shutdown()
+        release(ws, graceful = completed)
         return result
     }
 
@@ -400,8 +517,7 @@ object WebOsClient {
             DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for $uri response")
             lastCommandError = "${endpoint.url}: timed out waiting for the TV"
         }
-        ws.close(1000, null)
-        client.dispatcher.executorService.shutdown()
+        release(ws, graceful = completed)
         return result
     }
 
@@ -459,11 +575,15 @@ object WebOsClient {
     }
 
     /**
-     * Some webOS firmware doesn't expose its MAC over SSAP at all. As a fallback,
-     * read the Android device's own ARP cache (/proc/net/arp) for a row matching
-     * this IP \u2014 the kernel populates this automatically after any TCP connection
-     * to that IP, which waitForTv()/pair() have already done by the time this runs.
-     * Not available on every device/Android version; fails safe (returns null).
+     * Last-ditch fallback for firmware that doesn't expose its MAC over SSAP at all:
+     * read the Android device's own ARP cache (/proc/net/arp) for a row matching this
+     * IP, which the kernel populates after any TCP connection to it - something
+     * waitForTv()/pair() have already done by the time this runs.
+     *
+     * Do not count on it. Android 10 and up refuse the read outright
+     * ("/proc/net/arp: open failed: EACCES"), so on any current phone the SSAP
+     * getinfo lookup above is the only thing that actually works, and if that fails
+     * too the user has to type the MAC in by hand. Fails safe (returns null).
      */
     private fun getMacFromArpTable(ip: String): String? {
         return try {
@@ -471,10 +591,7 @@ object WebOsClient {
                 .map { it.trim().split(Regex("\\s+")) }
                 .firstOrNull { cols -> cols.firstOrNull() == ip }
                 ?.getOrNull(3)
-                ?.takeIf { mac ->
-                    mac != "00:00:00:00:00:00" &&
-                        Regex("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$").matches(mac)
-                }
+                ?.takeIf { mac -> mac != "00:00:00:00:00:00" && MAC_PATTERN.matches(mac) }
                 ?.uppercase()
         } catch (e: Exception) {
             DebugLog.log(TAG, "getMacFromArpTable: unavailable - ${e.javaClass.simpleName}: ${e.message}")
@@ -482,19 +599,44 @@ object WebOsClient {
         }
     }
 
+    private val MAC_PATTERN = Regex("^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+
+    /**
+     * getinfo splits its answer across two pairs of objects: "wired"/"wifi" carry the
+     * connection state, while "wiredInfo"/"wifiInfo" carry the macAddress. Prefer the
+     * MAC of whichever interface is actually connected - a TV on Ethernet still reports
+     * a Wi-Fi MAC, and a magic packet aimed at the idle interface is simply ignored.
+     */
+    private fun extractMac(payload: JSONObject): String? {
+        val wiredMac = macIn(payload.optJSONObject("wiredInfo")) ?: macIn(payload.optJSONObject("wired"))
+        val wifiMac = macIn(payload.optJSONObject("wifiInfo")) ?: macIn(payload.optJSONObject("wifi"))
+        val wiredConnected = payload.optJSONObject("wired")?.optString("state") == "connected"
+        val wifiConnected = payload.optJSONObject("wifi")?.optString("state") == "connected"
+        return when {
+            wiredConnected && wiredMac != null -> wiredMac
+            wifiConnected && wifiMac != null -> wifiMac
+            else -> wiredMac ?: wifiMac
+        }
+    }
+
+    private fun macIn(obj: JSONObject?): String? =
+        obj?.optString("macAddress")?.takeIf { MAC_PATTERN.matches(it) }?.uppercase()
+
     private fun getMacOverEndpoint(endpoint: Endpoint, clientKey: String): String? {
         DebugLog.log(TAG, "getMacOverEndpoint: trying ${endpoint.url}")
         val client = clientFor(endpoint.secure)
         val latch = CountDownLatch(1)
         var result: String? = null
-        // Older webOS firmware (pre-~webOS 3.x unification) only exposes the
-        // legacy "system.connectionmanager" namespace; newer firmware uses
-        // "com.webos.service.connectionmanager". Try legacy first (matches
-        // the "system.launcher/launch" naming this TV already confirmed
-        // working for app-launch), then fall back to the modern name.
+        // The method is getinfo, not getStatus. Both getStatus spellings the old code
+        // tried came back "404 no such service or method" on every endpoint, which is
+        // why this TV never handed over its MAC and Wake-on-LAN had to be typed in by
+        // hand. Modern namespace first, legacy alias second, and the two old getStatus
+        // names last in case some firmware really does answer to them.
         val uris = listOf(
-            "ssap://system.connectionmanager/getStatus",
-            "ssap://com.webos.service.connectionmanager/getStatus"
+            "ssap://com.webos.service.connectionmanager/getinfo",
+            "ssap://system.connectionmanager/getinfo",
+            "ssap://com.webos.service.connectionmanager/getStatus",
+            "ssap://system.connectionmanager/getStatus"
         )
         var uriIndex = 0
         val request = Request.Builder().url(endpoint.url).build()
@@ -535,22 +677,17 @@ object WebOsClient {
                     if (type == "registered" && !registered) {
                         registered = true
                         sendStatusRequest(webSocket)
+                    } else if (type == "response" && !registered) {
+                        // A pairing prompt where "registered" belongs: our stored key is
+                        // no longer trusted, so there is nothing to read here.
+                        DebugLog.log(TAG, "${endpoint.url}: TV asked to pair again - cannot read the MAC with this key")
+                        latch.countDown()
                     } else if (type == "response") {
                         val payload = resp.optJSONObject("payload")
                         if (payload != null) {
-                            val wifi = payload.optJSONObject("wifi")
-                            val wired = payload.optJSONObject("wired")
-                            result = when {
-                                wifi != null && wifi.optString("state") == "connected" && wifi.has("macAddress") ->
-                                    wifi.getString("macAddress")
-                                wired != null && wired.optString("state") == "connected" && wired.has("macAddress") ->
-                                    wired.getString("macAddress")
-                                wifi != null && wifi.has("macAddress") -> wifi.getString("macAddress")
-                                wired != null && wired.has("macAddress") -> wired.getString("macAddress")
-                                else -> null
-                            }
+                            result = extractMac(payload)
                             if (result == null) {
-                                DebugLog.log(TAG, "${endpoint.url}: ${uris[uriIndex]} response had no macAddress field in wifi/wired")
+                                DebugLog.log(TAG, "${endpoint.url}: ${uris[uriIndex]} response carried no usable macAddress")
                             }
                         }
                         latch.countDown()
@@ -575,8 +712,7 @@ object WebOsClient {
         }
         val completed = latch.await(15, TimeUnit.SECONDS)
         if (!completed) DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for getStatus response")
-        ws.close(1000, null)
-        client.dispatcher.executorService.shutdown()
+        release(ws, graceful = completed)
         return result
     }
 }

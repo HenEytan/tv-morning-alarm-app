@@ -20,6 +20,7 @@ import android.text.method.ScrollingMovementMethod
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
@@ -563,7 +564,10 @@ class MainActivity : AppCompatActivity() {
             .setInputData(workDataOf(TvAlarmWorker.INPUT_MANUAL to true))
             .build()
         val wm = WorkManager.getInstance(this)
-        wm.enqueue(request)
+        // REPLACE cancels any run still in flight instead of adding a second one
+        // alongside it - tapping Run Now twice used to leave two workers talking to
+        // the TV at once. The worker checks isStopped and bails out when superseded.
+        wm.enqueueUniqueWork(TvAlarmWorker.UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request)
         wm.getWorkInfoByIdLiveData(request.id).observe(this) { info ->
             if (info != null && info.state.isFinished) {
                 binding.btnRunNow.isEnabled = true
