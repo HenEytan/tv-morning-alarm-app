@@ -3,6 +3,7 @@ package com.henos.tvalarm
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
@@ -23,7 +24,12 @@ class AlarmReceiver : BroadcastReceiver() {
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setInputData(workDataOf(TvAlarmWorker.INPUT_MANUAL to false))
             .build()
-        WorkManager.getInstance(context).enqueue(request)
+        // Unique work, so a run that is somehow still in flight can't end up racing
+        // this one against the same TV. REPLACE rather than KEEP: the alarm that just
+        // fired is the run the user actually cares about right now.
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            TvAlarmWorker.UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request
+        )
 
         // Exact alarms are one-shot: arm tomorrow's right away.
         AlarmScheduler.scheduleNext(context)
