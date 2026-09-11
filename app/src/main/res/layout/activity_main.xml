@@ -26,6 +26,17 @@
             android:text="Wakes your LG TV and starts Spotify, on a schedule you set"
             android:textSize="13sp"
             android:textColor="@color/text_secondary"
+            android:layout_marginBottom="4dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+
+        <!-- Filled in at runtime from the APK's own versionName, so it always
+             reflects the installed build rather than a value typed into the layout. -->
+        <TextView
+            android:id="@+id/textVersion"
+            android:text="Version"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
             android:layout_marginBottom="20dp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />

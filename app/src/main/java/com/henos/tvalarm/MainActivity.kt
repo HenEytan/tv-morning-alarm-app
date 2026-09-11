@@ -118,6 +118,8 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        binding.textVersion.text = "Version ${AppVersion.name(this)}"
+
         binding.inputTvIp.setText(Prefs.tvIp(this))
         binding.inputTvMac.setText(Prefs.tvMac(this))
         binding.inputPlaylistUri.setText(Prefs.playlistUri(this))

@@ -39,9 +39,16 @@ object DebugLog {
         log("====", title)
     }
 
+    /**
+     * The log, with the app version stamped on the front. A log gets copied out of the
+     * app and read somewhere else, where the first question is always which build
+     * produced it - so the answer travels with it instead of having to be asked for.
+     */
     fun getLog(): String {
         val ctx = appContext ?: return "(log unavailable)"
-        return ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString(KEY, "") ?: "(empty \u2014 nothing has run yet)"
+        val body = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString(KEY, "")
+        if (body.isNullOrBlank()) return "(empty \u2014 nothing has run yet)"
+        return "TV Morning Alarm ${AppVersion.name(ctx)}\n\n" + body
     }
 
     fun clear() {

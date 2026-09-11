@@ -3,6 +3,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// CI passes github.run_number as BUILD_NUMBER, so the version shown inside the app
+// matches the "build-N" release the APK was downloaded from. A local build has no
+// such number and is labelled "dev" so it can't be mistaken for a published one.
+def rawBuildNumber = System.getenv("BUILD_NUMBER")
+def buildNumber = (rawBuildNumber != null && rawBuildNumber.isInteger()) ? rawBuildNumber.toInteger() : 0
+
 android {
     namespace = "com.henos.tvalarm"
     compileSdk = 34
@@ -11,8 +17,8 @@ android {
         applicationId = "com.henos.tvalarm"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = buildNumber > 0 ? buildNumber : 1
+        versionName = buildNumber > 0 ? "1.0 (build ${buildNumber})" : "1.0 (dev)"
     }
 
     buildTypes {

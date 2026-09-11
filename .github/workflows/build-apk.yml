@@ -33,6 +33,10 @@ jobs:
 
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace
+        env:
+          # Stamps the APK with this run number so the version shown in the app
+          # matches the build-N release tag published below.
+          BUILD_NUMBER: ${{ github.run_number }}
 
       - name: Publish APK as release
         uses: softprops/action-gh-release@v2
