@@ -12,6 +12,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Updating in place (Updater.kt). Lets the app hand its own downloaded APK to
+         PackageInstaller; the user still grants "install unknown apps" for this app
+         once, and the screen says so rather than letting the detour look like a bug. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="true"
@@ -34,6 +38,13 @@
 
         <receiver
             android:name=".AlarmReceiver"
+            android:exported="false" />
+
+        <!-- PackageInstaller answers here (UpdateReceiver.kt). Not exported: the only
+             sender is the system, delivering the PendingIntent this app created for
+             its own install session. -->
+        <receiver
+            android:name=".UpdateReceiver"
             android:exported="false" />
 
         <receiver

@@ -21,9 +21,39 @@ android {
         versionName = buildNumber > 0 ? "1.0 (build ${buildNumber})" : "1.0 (dev)"
     }
 
+    // Release signing, read from android/keystore.properties when it is there.
+    // Its whole purpose is the in-app updater: Android replaces an install only
+    // when the new APK carries the SAME signing certificate, and a debug build
+    // is signed with a keystore the machine (or the CI runner) generates for
+    // itself — so two debug builds do not match and never will.
+    //
+    // Without the file, assembleRelease still builds and stays UNSIGNED. That is
+    // deliberate: an unsigned APK fails loudly at install time, where a silent
+    // fall back to the debug key would produce something that installs today and
+    // can never be updated.
+    signingConfigs {
+        release {
+            def props = rootProject.file("keystore.properties")
+            if (props.exists()) {
+                def k = new Properties()
+                k.load(new FileInputStream(props))
+                storeFile file(k['storeFile'])
+                storePassword k['storePassword']
+                keyAlias k['keyAlias']
+                keyPassword k['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         debug {
             minifyEnabled = false
+        }
+        release {
+            minifyEnabled = false
+            if (rootProject.file("keystore.properties").exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 

@@ -330,6 +330,53 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Settings live only on this phone and were all typed by hand, so there is a
+             copy of them, and the app can replace itself without an uninstall. -->
+        <com.google.android.material.card.MaterialCardView style="@style/CardSection">
+            <LinearLayout
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <TextView android:text="Backup &amp; updates" style="@style/SectionTitle" />
+
+                <TextView
+                    android:id="@+id/statusBackup"
+                    style="@style/StatusLine"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnExportSettings"
+                    android:text="Save settings to a file"
+                    style="@style/OutlinedActionButton"
+                    android:layout_marginTop="0dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnImportSettings"
+                    android:text="Restore settings from a file"
+                    style="@style/TextButtonMuted"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:id="@+id/statusUpdate"
+                    style="@style/StatusLine"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnUpdate"
+                    android:text="Check for updates"
+                    style="@style/TextButtonMuted"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnViewLog"
             android:text="View Debug Log"

@@ -1,6 +1,7 @@
 package com.henos.tvalarm
 
 import android.annotation.SuppressLint
+import androidx.activity.result.contract.ActivityResultContracts
 import android.os.Handler
 import android.os.Looper
 import android.text.Editable
@@ -35,6 +36,39 @@ import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
 
+    // --- Backup & updates -------------------------------------------------
+    // Registered as fields: an ActivityResultLauncher must be created before the
+    // activity is STARTED, so one built inside a click handler throws.
+
+    private val exportSettings = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) {
+            val ok = Backup.writeTo(this, uri)
+            setStatus(
+                binding.statusBackup,
+                if (ok) "Settings saved to the file you chose." else "Couldn't write that file.",
+                if (ok) StatusKind.SUCCESS else StatusKind.ERROR,
+            )
+        }
+    }
+
+    private val importSettings = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) restoreFrom(uri)
+    }
+
+    private val allowInstalls = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        // Back from "install unknown apps": carry on if it was granted.
+        if (Updater.canInstall(this)) pendingUpdate?.let { apk -> installUpdate(apk) }
+    }
+
+    private var pendingUpdate: java.io.File? = null
+
+
     private lateinit var binding: ActivityMainBinding
     private val timeFmt = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
     private val countdownHandler = Handler(Looper.getMainLooper())
@@ -63,8 +97,132 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         try {
             setupUi()
+            // A copy of the settings, once a day, and a look at whether a newer
+            // build exists. Both off the main thread, both silent, and neither
+            // fatal — a failed backup or an unreachable GitHub must not colour
+            // opening an alarm app.
+            thread { Backup.autoBackupIfDue(this) }
+            checkForUpdate(force = false)
         } catch (t: Throwable) {
             showCrashScreen(t)
+        }
+    }
+
+    /** Put a picked settings file back, after copying what is here now. */
+    private fun restoreFrom(uri: android.net.Uri) {
+        // The guard first: restoring the wrong file must itself be reversible.
+        Backup.takeNow(this)
+        when (val read = Backup.readFrom(this, uri)) {
+            is Backup.Read.Ok -> {
+                Backup.apply(this, read.settings)
+                setupUi()
+                setStatus(
+                    binding.statusBackup,
+                    "Settings restored. You'll pair with the TV again — the pairing key is never in a backup.",
+                    StatusKind.SUCCESS,
+                )
+            }
+            is Backup.Read.Bad -> setStatus(
+                binding.statusBackup,
+                when (read.problem) {
+                    Backup.Problem.WRONG_APP -> "That's a backup of a different app."
+                    Backup.Problem.TOO_NEW -> "That file was written by a newer version. Update first."
+                    Backup.Problem.UNREADABLE -> "That file is damaged."
+                    Backup.Problem.NOT_A_BACKUP -> "That isn't a settings file for this app."
+                },
+                StatusKind.ERROR,
+            )
+        }
+    }
+
+    /**
+     * Is there a newer published build?
+     *
+     * `force` is the button; without it the check is throttled to once a day, so
+     * opening the app repeatedly costs nothing.
+     *
+     * The refusal is the part worth reading: [Updater.installability] compares
+     * the DOWNLOADED file's package and signing certificate with the running app
+     * BEFORE anything is installed. Until CI is given signing secrets it
+     * publishes debug builds whose key the runner regenerates on every run, so
+     * two published APKs do not share a signature and Android will not replace
+     * one with the other. That is reported as "install it by hand", not as an
+     * error to retry.
+     */
+    private fun checkForUpdate(force: Boolean) {
+        thread {
+            val result = Updater.check(this, force = force)
+            runOnUiThread {
+                when (result) {
+                    is Updater.Check.UpToDate ->
+                        if (force) setStatus(binding.statusUpdate, "You're on the latest build.", StatusKind.SUCCESS)
+                    is Updater.Check.Failed ->
+                        if (force) setStatus(binding.statusUpdate, "Couldn't reach GitHub to check.", StatusKind.NEUTRAL)
+                    is Updater.Check.Available -> {
+                        setStatus(
+                            binding.statusUpdate,
+                            "Build ${result.release.versionCode} is available — downloading…",
+                            StatusKind.NEUTRAL,
+                        )
+                        downloadUpdate(result.release)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun downloadUpdate(release: Updater.Release) {
+        thread {
+            val apk = Updater.download(this, release)
+            val verdict = apk?.let { Updater.installability(this, it) }
+            runOnUiThread {
+                when {
+                    apk == null -> setStatus(
+                        binding.statusUpdate,
+                        "The download didn't finish. Nothing was changed.",
+                        StatusKind.ERROR,
+                    )
+                    verdict == Updater.Installability.OK -> {
+                        pendingUpdate = apk
+                        installUpdate(apk)
+                    }
+                    verdict == Updater.Installability.WRONG_SIGNER -> setStatus(
+                        binding.statusUpdate,
+                        "Build ${release.versionCode} is signed with a different key, so Android won't replace " +
+                            "this install with it. Save your settings to a file, then install the APK from the " +
+                            "release by hand.",
+                        StatusKind.ERROR,
+                    )
+                    verdict == Updater.Installability.WRONG_PACKAGE -> setStatus(
+                        binding.statusUpdate,
+                        "That download is a different app. Nothing was installed.",
+                        StatusKind.ERROR,
+                    )
+                    else -> setStatus(
+                        binding.statusUpdate,
+                        "That build is older than this one. Nothing was installed.",
+                        StatusKind.NEUTRAL,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun installUpdate(apk: java.io.File) {
+        if (!Updater.canInstall(this)) {
+            setStatus(
+                binding.statusUpdate,
+                "Android needs a one-time permission to let this app install its own update.",
+                StatusKind.NEUTRAL,
+            )
+            allowInstalls.launch(Updater.installPermissionIntent(this))
+            return
+        }
+        setStatus(binding.statusUpdate, "Installing… the app restarts when it lands.", StatusKind.NEUTRAL)
+        // The outcome arrives in UpdateReceiver, not here: a successful install is
+        // delivered to the process that replaces this one.
+        if (!Updater.install(this, apk)) {
+            setStatus(binding.statusUpdate, "The install couldn't start. Nothing was changed.", StatusKind.ERROR)
         }
     }
 
@@ -119,6 +277,11 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         binding.textVersion.text = "Version ${AppVersion.name(this)}"
+        setStatus(
+            binding.statusBackup,
+            "A copy of these settings is kept on this phone once a day. Save a file to keep one off it.",
+            StatusKind.NEUTRAL,
+        )
 
         binding.inputTvIp.setText(Prefs.tvIp(this))
         binding.inputTvMac.setText(Prefs.tvMac(this))
@@ -174,6 +337,9 @@ class MainActivity : AppCompatActivity() {
         binding.btnTurnOff.setOnClickListener { doTurnOff() }
         binding.btnSave.setOnClickListener { doSaveAndSchedule() }
         binding.btnRunNow.setOnClickListener { doRunNow() }
+        binding.btnExportSettings.setOnClickListener { exportSettings.launch(Backup.suggestedName()) }
+        binding.btnImportSettings.setOnClickListener { importSettings.launch(arrayOf("application/json", "*/*")) }
+        binding.btnUpdate.setOnClickListener { checkForUpdate(force = true) }
         binding.btnViewLog.setOnClickListener { showDebugLog() }
         binding.btnViewLog.setOnLongClickListener {
             DebugLog.clear()

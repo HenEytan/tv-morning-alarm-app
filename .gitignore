@@ -3,3 +3,10 @@
 build/
 local.properties
 *.apk
+
+# Release signing material. Written by CI from secrets, or by hand locally.
+# Never committed: the keystore is the only thing that lets a published build
+# replace an install, and a leaked one lets anyone else's build do it too.
+keystore.properties
+*.jks
+*.keystore
