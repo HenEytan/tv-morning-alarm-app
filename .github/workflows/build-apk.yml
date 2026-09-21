@@ -31,11 +31,53 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+      # Release signing, only when the secrets exist. This is what decides whether
+      # the published APK can REPLACE an install: Android upgrades in place only
+      # for a matching signing certificate, and a debug build is signed with a
+      # keystore this runner generates for itself — different on every run, so no
+      # two published debug builds can ever update each other. The in-app updater
+      # (Updater.kt) detects that and says "install it by hand" rather than
+      # failing at the end of a download.
+      - name: Release signing material
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "signed=no" >> "$GITHUB_OUTPUT"
+            echo "No signing secrets — publishing a DEBUG build. The in-app updater will refuse it." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 -d > release.jks
+          test -s release.jks
+          {
+            echo "storeFile=$(pwd)/release.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+          echo "signed=yes" >> "$GITHUB_OUTPUT"
+
+      - name: Build APK
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.signing.outputs.signed }}" = yes ]; then
+            gradle assembleRelease --stacktrace
+            cp app/build/outputs/apk/release/app-release.apk app-to-publish.apk
+          else
+            gradle assembleDebug --stacktrace
+            cp app/build/outputs/apk/debug/app-debug.apk app-to-publish.apk
+          fi
+          ls -l app-to-publish.apk
         env:
           # Stamps the APK with this run number so the version shown in the app
-          # matches the build-N release tag published below.
+          # matches the build-N release tag published below — and so the number
+          # the updater compares IS the versionCode Android compares.
           BUILD_NUMBER: ${{ github.run_number }}
 
       - name: Publish APK as release
@@ -43,6 +85,10 @@ jobs:
         with:
           tag_name: build-${{ github.run_number }}
           name: TV Morning Alarm build ${{ github.run_number }}
-          files: app/build/outputs/apk/debug/app-debug.apk
+          body: |
+            ${{ steps.signing.outputs.signed == 'yes'
+              && 'Signed with the release key, so the app can install this over itself — Settings shows it as an update. Your settings and the TV pairing are kept.'
+              || 'DEBUG build, signed with a throwaway key this CI run generated. Android will not let it replace an existing install and the in-app updater refuses it by design: save your settings to a file first, then install this by hand. Set ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD to publish updatable builds.' }}
+          files: app-to-publish.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -15,6 +15,41 @@ phone.
 3. Launches the Spotify app on the TV and starts your chosen playlist,
    at a wake-up volume you set.
 
+## Backup and updates
+
+**Your settings are backed up.** The TV address, MAC, playlist, time, days and
+volume were all typed in by hand and lived only on this device. The app now
+keeps a copy of them on the device once a day (three kept), and **Backup &
+updates → Save settings to a file** writes one you can keep somewhere else —
+that is the copy that survives a reinstall or a new box. Restoring takes a copy
+of what is there now first, so restoring the wrong file is itself reversible.
+
+The TV **pairing key is never in a backup**. It is a credential for your
+television and a backup file travels; you pair again after restoring, which is
+one prompt on the TV screen.
+
+**The app updates itself.** It asks GitHub once a day whether a newer build
+exists, downloads it, and installs it over itself — no uninstall, settings kept.
+Android asks once for permission to let the app install its own updates.
+
+There is one condition, and the app is explicit about it rather than failing
+late: **Android replaces an install only when the new APK carries the same
+signing certificate.** With no signing secrets set, CI publishes a `debug` build
+signed with a key the runner generates for itself, so no two published builds
+match and the updater refuses them by name ("signed with a different key — save
+your settings to a file, then install by hand"). To publish updatable builds,
+set these repository secrets and CI signs a release build instead:
+
+| Secret | What it is |
+|---|---|
+| `ANDROID_KEYSTORE_B64` | the keystore, base64-encoded (`base64 -w0 release.jks`) |
+| `ANDROID_KEYSTORE_PASSWORD` | its store password |
+| `ANDROID_KEY_ALIAS` | the key alias inside it |
+| `ANDROID_KEY_PASSWORD` | that key's password |
+
+Keep the keystore. Losing it means no future build can update an existing
+install — everyone has to uninstall first.
+
 ## Requirements
 
 - An LG TV running webOS, on the same Wi-Fi network as the device
@@ -27,7 +62,7 @@ phone.
 
 ## Getting started
 
-1. **Install the APK.** Grab the latest `app-debug.apk` from
+1. **Install the APK.** Grab the latest APK from
    [Releases](https://github.com/HenEytan/tv-morning-alarm-app/releases),
    or build it yourself (see below). Sideload it onto the Android
    device/box that will run the alarm.
