@@ -99,7 +99,7 @@ object Updater {
         }
         val url = apk?.optString("browser_download_url").orEmpty()
         if (code == null || url.isEmpty()) null
-        else Release(code, root.optString("tag_name"), url, apk.optLong("size", 0L))
+        else Release(code, root.optString("tag_name"), url, apk?.optLong("size", 0L) ?: 0L)
     } catch (e: Exception) {
         null
     }
