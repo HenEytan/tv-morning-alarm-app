@@ -25,6 +25,11 @@ import android.os.Build
  */
 class UpdateReceiver : BroadcastReceiver() {
 
+    companion object {
+        /** The action on the PendingIntent an install session reports to. */
+        const val ACTION = "com.henos.tvalarm.UPDATE_INSTALL_STATUS"
+    }
+
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent == null) return
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, Int.MIN_VALUE)
