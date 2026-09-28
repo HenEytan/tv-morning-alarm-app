@@ -89,8 +89,23 @@ object DebugLog {
         val ctx = appContext ?: return
         try { file(ctx).delete() } catch (e: Exception) { }
         // The pre-file log lived in SharedPreferences, unredacted. Clearing
-        // removes that copy too, so an old install stops carrying the key.
-        ctx.getSharedPreferences(LEGACY_PREF, Context.MODE_PRIVATE).edit().clear().apply()
+        // removes that copy too (it is also dropped at every start).
+        dropLegacyCopy(ctx)
+    }
+
+    /**
+     * Delete the pre-file log for good. It lived in SharedPreferences, UNREDACTED
+     * — every install up to build 121 has the pairing key in it — and it used to
+     * go only when someone long-pressed "clear". Nothing reads it any more, so
+     * it is removed on the first start of a build that has this (second review
+     * R4). Idempotent: once the file is gone this finds nothing to delete.
+     */
+    fun dropLegacyCopy(ctx: Context) {
+        try {
+            ctx.deleteSharedPreferences(LEGACY_PREF)
+        } catch (e: Exception) {
+            // Never worth failing a launch over.
+        }
     }
 
     private fun file(ctx: Context) = File(ctx.filesDir, FILE)
