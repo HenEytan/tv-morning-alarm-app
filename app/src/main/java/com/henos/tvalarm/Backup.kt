@@ -109,9 +109,23 @@ object Backup {
     fun apply(context: Context, settings: JSONObject) {
         val e = Prefs.get(context).edit()
         for (k in STRINGS) if (settings.has(k) && k !in EXCLUDED) e.putString(k, settings.optString(k, ""))
-        for (k in INTS) if (settings.has(k) && k !in EXCLUDED) e.putInt(k, settings.optInt(k, defaultInt(k)))
+        for (k in INTS) if (settings.has(k) && k !in EXCLUDED) e.putInt(k, sanitizeInt(k, settings.optInt(k, defaultInt(k))))
         for (k in BOOLS) if (settings.has(k) && k !in EXCLUDED) e.putBoolean(k, settings.optBoolean(k, true))
         e.apply()
+    }
+
+    /**
+     * A restored number, made safe to store. A file could have been written by
+     * anything: an hour of 25 would roll the lenient Calendar into the next
+     * day, a days mask of 0 fires every day while the screen says "no days
+     * selected", and a volume of 500 is a volume of 500. Pure; tested.
+     */
+    fun sanitizeInt(key: String, value: Int): Int = when (key) {
+        "alarm_hour" -> value.coerceIn(0, 23)
+        "alarm_minute" -> value.coerceIn(0, 59)
+        "alarm_days_mask" -> (value and Prefs.ALL_DAYS_MASK).let { if (it == 0) Prefs.ALL_DAYS_MASK else it }
+        "wake_volume" -> value.coerceIn(0, 100)
+        else -> value
     }
 
     private fun defaultInt(key: String) = when (key) {
