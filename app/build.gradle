@@ -21,7 +21,7 @@ android {
         versionName = buildNumber > 0 ? "1.0 (build ${buildNumber})" : "1.0 (dev)"
     }
 
-    // Release signing, read from android/keystore.properties when it is there.
+    // Release signing, read from keystore.properties in the repo root when it is there.
     // Its whole purpose is the in-app updater: Android replaces an install only
     // when the new APK carries the SAME signing certificate, and a debug build
     // is signed with a keystore the machine (or the CI runner) generates for
@@ -78,4 +78,9 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // JVM unit tests (app/src/test). org.json is a stub in android.jar, so the
+    // real one is on the test classpath for Backup / Updater parsing tests.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

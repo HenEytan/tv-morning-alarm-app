@@ -3,11 +3,23 @@ name: Build APK
 on:
   push:
     branches: [ main ]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# WHAT REACHES A DEVICE. The in-app updater (Updater.kt) reads GitHub's
+# `releases/latest`, which is the newest normal (non-draft, non-prerelease)
+# release from ANY branch. So the rule is: a normal release is published only
+# from `main`, and only when it is release-signed. Everything else — a pull
+# request, a manual run from a branch, a run without the signing secrets —
+# builds and uploads a workflow artifact, and never becomes "latest".
+#
+# Two things used to break that. A workflow_dispatch from a feature branch
+# published build-117 as latest (every device would have installed it), and
+# missing signing secrets silently published a DEBUG build as latest, which
+# every release-signed install downloads, refuses, and then cannot see past.
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -26,18 +38,29 @@ jobs:
       - name: Install required SDK packages
         run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
+      # The Gradle version is the wrapper's (gradle/wrapper/gradle-wrapper.properties),
+      # so CI and a local `./gradlew` build with the same one.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
 
-      # Release signing, only when the secrets exist. This is what decides whether
-      # the published APK can REPLACE an install: Android upgrades in place only
-      # for a matching signing certificate, and a debug build is signed with a
-      # keystore this runner generates for itself — different on every run, so no
-      # two published debug builds can ever update each other. The in-app updater
-      # (Updater.kt) detects that and says "install it by hand" rather than
-      # failing at the end of a download.
+      - name: Decide whether this run may publish
+        id: policy
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "publish=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=no" >> "$GITHUB_OUTPUT"
+            echo "Not on main (ref=${{ github.ref }}, event=${{ github.event_name }}): building only, nothing is published." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Release signing. This is what decides whether the published APK can REPLACE
+      # an install: Android upgrades in place only for a matching signing
+      # certificate, and a debug build is signed with a keystore this runner
+      # generates for itself — different on every run, so no two published debug
+      # builds can ever update each other. A publishing run therefore FAILS without
+      # the secrets rather than publishing a debug build that every installed
+      # device would download, refuse, and then be stuck behind.
       - name: Release signing material
         id: signing
         env:
@@ -45,12 +68,21 @@ jobs:
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          PUBLISH: ${{ steps.policy.outputs.publish }}
         run: |
           set -euo pipefail
           if [ -z "${KEYSTORE_B64:-}" ]; then
+            if [ "$PUBLISH" = yes ]; then
+              echo "::error::Signing secrets are missing (ANDROID_KEYSTORE_B64 and friends). Refusing to publish a debug build as the latest release: installed devices would download it, refuse it, and see no further updates." >&2
+              exit 1
+            fi
             echo "signed=no" >> "$GITHUB_OUTPUT"
-            echo "No signing secrets — publishing a DEBUG build. The in-app updater will refuse it." >> "$GITHUB_STEP_SUMMARY"
+            echo "No signing secrets — building a DEBUG apk as an artifact only." >> "$GITHUB_STEP_SUMMARY"
             exit 0
+          fi
+          if [ -z "${STORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
+            echo "::error::ANDROID_KEYSTORE_B64 is set but ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD are not." >&2
+            exit 1
           fi
           umask 077
           printf '%s' "$KEYSTORE_B64" | base64 -d > release.jks
@@ -63,14 +95,64 @@ jobs:
           } > keystore.properties
           echo "signed=yes" >> "$GITHUB_OUTPUT"
 
+      # The versionCode is the run number (app/build.gradle), and the updater
+      # compares it with the number in the `build-N` tag. Renaming or recreating
+      # this workflow resets the counter, and every later build would then look
+      # OLDER than what is installed — the updater would say "up to date" forever
+      # and nothing would tell anyone. So a publishing run checks that its number
+      # is above the latest published one, and stops if it is not. Recovery is
+      # VERSION_CODE_OFFSET below: set it to the last published number and the
+      # count carries on from there.
+      - name: Build number
+        id: number
+        env:
+          VERSION_CODE_OFFSET: 0
+          PUBLISH: ${{ steps.policy.outputs.publish }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          n=$(( ${{ github.run_number }} + VERSION_CODE_OFFSET ))
+          echo "build_number=$n" >> "$GITHUB_OUTPUT"
+          if [ "$PUBLISH" = yes ]; then
+            latest=$(gh release view --repo "${{ github.repository }}" --json tagName --jq .tagName 2>/dev/null || true)
+            case "$latest" in
+              build-*)
+                last=${latest#build-}
+                if [ "$n" -le "$last" ]; then
+                  echo "::error::This run's number ($n) is not above the latest published release ($latest). The workflow counter has been reset; set VERSION_CODE_OFFSET in build-apk.yml to $last and re-run." >&2
+                  exit 1
+                fi
+                ;;
+            esac
+          fi
+
+      # Unit tests are pure JVM (app/src/test) and gate everything. Lint is run
+      # and its report kept, but does not yet block: this step was added without
+      # an SDK to run it against, so its first run decides the baseline. Make it
+      # blocking (drop continue-on-error) once one run has come back clean.
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Lint
+        continue-on-error: true
+        run: ./gradlew lintDebug --stacktrace
+
+      - name: Lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+
       - name: Build APK
         run: |
           set -euo pipefail
           if [ "${{ steps.signing.outputs.signed }}" = yes ]; then
-            gradle assembleRelease --stacktrace
+            ./gradlew assembleRelease --stacktrace
             cp app/build/outputs/apk/release/app-release.apk app-to-publish.apk
           else
-            gradle assembleDebug --stacktrace
+            ./gradlew assembleDebug --stacktrace
             cp app/build/outputs/apk/debug/app-debug.apk app-to-publish.apk
           fi
           ls -l app-to-publish.apk
@@ -78,17 +160,24 @@ jobs:
           # Stamps the APK with this run number so the version shown in the app
           # matches the build-N release tag published below — and so the number
           # the updater compares IS the versionCode Android compares.
-          BUILD_NUMBER: ${{ github.run_number }}
+          BUILD_NUMBER: ${{ steps.number.outputs.build_number }}
+
+      # Every run keeps its APK as an artifact (90 days), so a branch build can be
+      # sideloaded by hand for testing without ever touching `releases/latest`.
+      - name: Keep the APK as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ steps.number.outputs.build_number }}-${{ steps.signing.outputs.signed == 'yes' && 'release' || 'debug' }}
+          path: app-to-publish.apk
 
       - name: Publish APK as release
+        if: steps.policy.outputs.publish == 'yes' && steps.signing.outputs.signed == 'yes'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: TV Morning Alarm build ${{ github.run_number }}
+          tag_name: build-${{ steps.number.outputs.build_number }}
+          name: TV Morning Alarm build ${{ steps.number.outputs.build_number }}
           body: |
-            ${{ steps.signing.outputs.signed == 'yes'
-              && 'Signed with the release key, so the app can install this over itself — Settings shows it as an update. Your settings and the TV pairing are kept.'
-              || 'DEBUG build, signed with a throwaway key this CI run generated. Android will not let it replace an existing install and the in-app updater refuses it by design: save your settings to a file first, then install this by hand. Set ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD to publish updatable builds.' }}
+            Signed with the release key, so the app can install this over itself — Settings shows it as an update. Your settings and the TV pairing are kept.
           files: app-to-publish.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
