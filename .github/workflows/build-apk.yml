@@ -13,8 +13,9 @@ permissions:
 # `releases/latest`, which is the newest normal (non-draft, non-prerelease)
 # release from ANY branch. So the rule is: a normal release is published only
 # from `main`, and only when it is release-signed. Everything else — a pull
-# request, a manual run from a branch, a run without the signing secrets —
-# builds and uploads a workflow artifact, and never becomes "latest".
+# request, a manual run from a branch — builds a DEBUG apk, uploads it as a
+# workflow artifact, and never becomes "latest". A run on `main` without the
+# signing secrets fails rather than publish anything.
 #
 # Two things used to break that. A workflow_dispatch from a feature branch
 # published build-117 as latest (every device would have installed it), and
@@ -60,6 +61,25 @@ jobs:
             echo "Not on main (ref=${{ github.ref }}, event=${{ github.event_name }}): building only, nothing is published." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Unit tests are pure JVM (app/src/test) and gate everything, and they run
+      # BEFORE the signing step: a publishing run that stops for missing secrets
+      # must still have said whether the code is sound (run 128 stopped at the
+      # secrets and never reached them). Lint gates too — its first real run
+      # (127, a pull request) came back clean, so it no longer only advises.
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Lint
+        run: ./gradlew lintDebug --stacktrace
+
+      - name: Lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+
       # Release signing. This is what decides whether the published APK can REPLACE
       # an install: Android upgrades in place only for a matching signing
       # certificate, and a debug build is signed with a keystore this runner
@@ -77,14 +97,18 @@ jobs:
           PUBLISH: ${{ steps.policy.outputs.publish }}
         run: |
           set -euo pipefail
-          if [ -z "${KEYSTORE_B64:-}" ]; then
-            if [ "$PUBLISH" = yes ]; then
-              echo "::error::Signing secrets are missing (ANDROID_KEYSTORE_B64 and friends). Refusing to publish a debug build as the latest release: installed devices would download it, refuse it, and see no further updates." >&2
-              exit 1
-            fi
+          # Only a publishing run is signed. A same-repo pull request has the
+          # secrets too, and used to produce a RELEASE-signed APK of unreviewed
+          # branch code as a downloadable artifact (second review R5) — one
+          # hand-publish away from every device.
+          if [ "$PUBLISH" != yes ]; then
             echo "signed=no" >> "$GITHUB_OUTPUT"
-            echo "No signing secrets — building a DEBUG apk as an artifact only." >> "$GITHUB_STEP_SUMMARY"
+            echo "Not a publishing run — building a DEBUG apk as an artifact only." >> "$GITHUB_STEP_SUMMARY"
             exit 0
+          fi
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "::error::Signing secrets are missing (ANDROID_KEYSTORE_B64 and friends). Refusing to publish a debug build as the latest release: installed devices would download it, refuse it, and see no further updates." >&2
+            exit 1
           fi
           if [ -z "${STORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
             echo "::error::ANDROID_KEYSTORE_B64 is set but ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD are not." >&2
@@ -131,25 +155,6 @@ jobs:
                 ;;
             esac
           fi
-
-      # Unit tests are pure JVM (app/src/test) and gate everything. Lint is run
-      # and its report kept, but does not yet block: this step was added without
-      # an SDK to run it against, so its first run decides the baseline. Make it
-      # blocking (drop continue-on-error) once one run has come back clean.
-      - name: Unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace
-
-      - name: Lint
-        continue-on-error: true
-        run: ./gradlew lintDebug --stacktrace
-
-      - name: Lint report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lint-report
-          path: app/build/reports/lint-results-debug.html
-          if-no-files-found: ignore
 
       - name: Build APK
         run: |
