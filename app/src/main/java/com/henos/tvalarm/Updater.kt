@@ -116,8 +116,10 @@ object Updater {
     fun check(context: Context, force: Boolean = false, nowMs: Long = System.currentTimeMillis()): Check {
         val prefs = Prefs.get(context)
         if (!force && !checkDue(prefs.getLong(LAST_CHECK_KEY, 0L), nowMs)) return Check.UpToDate
-        prefs.edit().putLong(LAST_CHECK_KEY, nowMs).apply()
         val body = get("https://api.github.com/repos/$REPO/releases/latest") ?: return Check.Failed("offline")
+        // Stamped only once GitHub answered: a check that failed (offline at
+        // launch) must not silence the next 24 hours of checks.
+        prefs.edit().putLong(LAST_CHECK_KEY, nowMs).apply()
         val release = parseRelease(body) ?: return Check.Failed("unreadable")
         // EQUAL is up to date, not available: Android accepts an install at the
         // same code, but offering one means asking to download the running build

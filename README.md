@@ -4,7 +4,9 @@ Wakes an LG webOS TV and starts a Spotify playlist on a schedule \u2014 a
 DIY morning alarm that plays through your TV's speakers instead of a
 phone.
 
-**Latest release:** [v1.0.0](https://github.com/HenEytan/tv-morning-alarm-app/releases/tag/v1.0.0)
+**Latest release:** the newest `build-N` on the
+[Releases](https://github.com/HenEytan/tv-morning-alarm-app/releases) page
+(`v1.0.0` is an old tag the in-app updater does not read).
 
 ## What it does
 
@@ -22,23 +24,28 @@ volume were all typed in by hand and lived only on this device. The app now
 keeps a copy of them on the device once a day (three kept), and **Backup &
 updates → Save settings to a file** writes one you can keep somewhere else —
 that is the copy that survives a reinstall or a new box. Restoring takes a copy
-of what is there now first, so restoring the wrong file is itself reversible.
+of what is there now first, and **Restore the on-device copy** puts that copy
+back, so restoring the wrong file is itself reversible. A restore re-arms (or
+cancels) the alarm from what it restored; restored numbers are range-checked.
 
 The TV **pairing key is never in a backup**. It is a credential for your
 television and a backup file travels; you pair again after restoring, which is
 one prompt on the TV screen.
 
 **The app updates itself.** It asks GitHub once a day whether a newer build
-exists, downloads it, and installs it over itself — no uninstall, settings kept.
-Android asks once for permission to let the app install its own updates.
+exists and downloads it; the install waits for a tap on **Install build N** and
+goes over the running app — no uninstall, settings kept. Android asks once for
+permission to let the app install its own updates.
 
 There is one condition, and the app is explicit about it rather than failing
 late: **Android replaces an install only when the new APK carries the same
-signing certificate.** With no signing secrets set, CI publishes a `debug` build
-signed with a key the runner generates for itself, so no two published builds
-match and the updater refuses them by name ("signed with a different key — save
-your settings to a file, then install by hand"). To publish updatable builds,
-set these repository secrets and CI signs a release build instead:
+signing certificate.** A debug build is signed with a key the runner generates
+for itself, so no two of them match and the updater refuses one by name
+("signed with a different key — save your settings to a file, then install by
+hand"). CI therefore **publishes only release-signed builds, and only from
+`main`**: a run without the signing secrets fails instead of publishing, and a
+run from any other branch (or a pull request) keeps its APK as a workflow
+artifact and publishes nothing. The secrets CI signs with:
 
 | Secret | What it is |
 |---|---|
@@ -95,7 +102,10 @@ persist it.
   Settings \u2192 Network.
 - **Alarm didn't fire** \u2014 check the in-app **Debug Log** (bottom of the
   screen) for a full timestamped trace of the last run, including SSAP
-  requests/responses. Long-press the log button to clear it.
+  requests/responses (the pairing key is redacted from it). Long-press the
+  log button to clear it. A red "Saved … but NOT armed" line on the
+  schedule means Android refused the exact alarm — grant "Alarms &
+  reminders" and tap Save again.
 - Make sure battery optimization is disabled for the app (it prompts
   for this after your first successful save) so Android doesn't kill
   it in the background before the scheduled time.
@@ -103,20 +113,31 @@ persist it.
 ## Building from source
 
 This repo builds via GitHub Actions (`.github/workflows/build-apk.yml`)
-on every push to `main`, publishing a debug APK to a `build-N` tag. To
-build locally instead:
+on every push to `main` and on pull requests: unit tests, lint (advisory),
+then the APK. A push to `main` with the signing secrets set publishes the
+release-signed APK to a `build-N` release, which is what installed apps
+update from; anything else only keeps the APK as a workflow artifact. The
+`versionCode` is the run number `N`.
+
+To build locally (the Gradle wrapper is committed; the Android SDK is
+needed):
 
 ```
+./gradlew testDebugUnitTest   # the JVM unit tests
 ./gradlew assembleDebug
 ```
 
-The output APK will be under `app/build/outputs/apk/debug/`.
+The output APK will be under `app/build/outputs/apk/debug/`. A local
+build is versioned `1.0 (dev)` with versionCode 1, so it sees every
+published build as newer. For a release-signed local build put a
+`keystore.properties` (`storeFile`, `storePassword`, `keyAlias`,
+`keyPassword`) in the repo root and run `./gradlew assembleRelease`.
 
 ## Tech notes
 
-- Talks to the TV over LG's SSAP protocol via WebSocket (`ws://` port
-  3000, `wss://` port 3001), the same protocol LG's own mobile remote
-  app uses.
+- Talks to the TV over LG's SSAP protocol via WebSocket (`wss://` port
+  3001 first, then `ws://` port 3000), the same protocol LG's own mobile
+  remote app uses.
 - TV discovery uses SSDP (UPnP) multicast to find LG-classified devices
   on the network.
 - Scheduling uses Android's exact alarms (`AlarmManager`) with

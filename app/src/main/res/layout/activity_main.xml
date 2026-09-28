@@ -361,6 +361,13 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnRestoreCopy"
+                    android:text="Restore the on-device copy"
+                    style="@style/TextButtonMuted"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
                 <TextView
                     android:id="@+id/statusUpdate"
                     style="@style/StatusLine"

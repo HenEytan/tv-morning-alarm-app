@@ -24,8 +24,11 @@ object Prefs {
     fun wakeVolume(context: Context) = get(context).getInt("wake_volume", 15)
 
     /** True if the given Calendar.DAY_OF_WEEK (SUNDAY=1..SATURDAY=7) is selected. */
-    fun isDaySelected(context: Context, calendarDayOfWeek: Int): Boolean {
-        val mask = alarmDaysMask(context)
+    fun isDaySelected(context: Context, calendarDayOfWeek: Int): Boolean =
+        isDaySelected(alarmDaysMask(context), calendarDayOfWeek)
+
+    /** The same, against a mask. Pure; tested. */
+    fun isDaySelected(mask: Int, calendarDayOfWeek: Int): Boolean {
         val bit = 1 shl (calendarDayOfWeek - Calendar.SUNDAY)
         return (mask and bit) != 0
     }
@@ -76,6 +79,14 @@ object Prefs {
         get(context).edit()
             .putBoolean("is_scheduled", true)
             .putLong("scheduled_at", System.currentTimeMillis())
+            .apply()
+    }
+
+    /** The alarm is no longer armed, and the screen must not say it is. */
+    fun markUnscheduled(context: Context) {
+        get(context).edit()
+            .putBoolean("is_scheduled", false)
+            .remove("next_alarm_at")
             .apply()
     }
 

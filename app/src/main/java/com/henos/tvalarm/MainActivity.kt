@@ -79,8 +79,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Maps each day chip to its java.util.Calendar.DAY_OF_WEEK constant. */
-    private val dayChips: List<Pair<Chip, Int>> by lazy {
+    /**
+     * Maps each day chip to its java.util.Calendar.DAY_OF_WEEK constant. A function,
+     * not a lazy field: [setupUi] inflates a fresh layout after a restore, and a
+     * list captured from the first binding would keep pointing at chips that are
+     * no longer on screen — the visible chips showed the XML default and taps on
+     * them were ignored when saving.
+     */
+    private fun dayChips(): List<Pair<Chip, Int>> =
         listOf(
             binding.chipSun to Calendar.SUNDAY,
             binding.chipMon to Calendar.MONDAY,
@@ -90,6 +96,17 @@ class MainActivity : AppCompatActivity() {
             binding.chipFri to Calendar.FRIDAY,
             binding.chipSat to Calendar.SATURDAY,
         )
+
+    /** True while the code, not the user, is moving the enable switch. */
+    private var settingSwitch = false
+
+    private fun setSwitchSilently(checked: Boolean) {
+        settingSwitch = true
+        try {
+            binding.switchAlarmEnabled.isChecked = checked
+        } finally {
+            settingSwitch = false
+        }
     }
 
     @SuppressLint("SetTextI18n")
@@ -108,6 +125,39 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Put the newest on-device daily copy back — the one taken before the last
+     * restore, or yesterday's. Confirmed first, with its date: this replaces the
+     * settings on screen, and a copy of those is taken before anything moves.
+     */
+    private fun offerRestoreCopy() {
+        val newest = Backup.copies(this).firstOrNull()
+        if (newest == null) {
+            setStatus(binding.statusBackup, "No on-device copy yet \u2014 one is taken once a day.", StatusKind.NEUTRAL)
+            return
+        }
+        val at = Backup.instantOf(newest.name) ?: 0L
+        AlertDialog.Builder(this)
+            .setTitle("Restore the on-device copy?")
+            .setMessage("Puts back the settings copied on ${timeFmt.format(Date(at))}. A copy of what is here now is taken first, so this is reversible.")
+            .setPositiveButton("Restore") { _, _ ->
+                val ok = Backup.restoreLatest(this)
+                if (ok) {
+                    val armed = AlarmScheduler.rearm(this, "restore-copy")
+                    setupUi()
+                    setStatus(
+                        binding.statusBackup,
+                        if (armed) "On-device copy restored and the alarm re-armed." else "On-device copy restored.",
+                        StatusKind.SUCCESS,
+                    )
+                } else {
+                    setStatus(binding.statusBackup, "Couldn't restore that copy. Nothing was changed.", StatusKind.ERROR)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     /** Put a picked settings file back, after copying what is here now. */
     private fun restoreFrom(uri: android.net.Uri) {
         // The guard first: restoring the wrong file must itself be reversible.
@@ -115,10 +165,21 @@ class MainActivity : AppCompatActivity() {
         when (val read = Backup.readFrom(this, uri)) {
             is Backup.Read.Ok -> {
                 Backup.apply(this, read.settings)
+                // The file may have changed the time, the days or the enabled flag,
+                // and the alarm armed in AlarmManager still carries the old ones:
+                // re-arm (or cancel) from what was just written, before the screen
+                // is rebuilt from it.
+                val armed = AlarmScheduler.rearm(this, "restore")
                 setupUi()
                 setStatus(
                     binding.statusBackup,
-                    "Settings restored. You'll pair with the TV again — the pairing key is never in a backup.",
+                    when {
+                        armed -> "Settings restored and the alarm re-armed."
+                        Prefs.clientKey(this) == null ->
+                            "Settings restored. Pair with the TV again, then tap Save — the pairing key is never in a backup."
+                        Prefs.isAlarmEnabled(this) -> "Settings restored. Tap Save + Schedule Alarm to arm it."
+                        else -> "Settings restored. The alarm is off."
+                    },
                     StatusKind.SUCCESS,
                 )
             }
@@ -183,8 +244,17 @@ class MainActivity : AppCompatActivity() {
                         StatusKind.ERROR,
                     )
                     verdict == Updater.Installability.OK -> {
+                        // Downloaded and checked, but NOT installed until asked: the
+                        // install confirmation Android shows can only be launched from
+                        // the foreground (Android 14 blocks it from a receiver), and
+                        // an alarm app must not replace itself under the user.
                         pendingUpdate = apk
-                        installUpdate(apk)
+                        binding.btnUpdate.text = "Install build ${release.versionCode}"
+                        setStatus(
+                            binding.statusUpdate,
+                            "Build ${release.versionCode} is downloaded and checked. Tap Install when you're ready \u2014 the app restarts.",
+                            StatusKind.SUCCESS,
+                        )
                     }
                     verdict == Updater.Installability.WRONG_SIGNER -> setStatus(
                         binding.statusUpdate,
@@ -292,7 +362,7 @@ class MainActivity : AppCompatActivity() {
         binding.timePicker.minute = Prefs.alarmMinute(this)
 
         val savedMask = Prefs.alarmDaysMask(this)
-        dayChips.forEach { (chip, dayOfWeek) ->
+        dayChips().forEach { (chip, dayOfWeek) ->
             chip.isChecked = (savedMask and (1 shl (dayOfWeek - Calendar.SUNDAY))) != 0
         }
 
@@ -306,24 +376,31 @@ class MainActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
         })
 
-        binding.switchAlarmEnabled.isChecked = Prefs.isAlarmEnabled(this)
+        setSwitchSilently(Prefs.isAlarmEnabled(this))
         binding.switchAlarmEnabled.setOnCheckedChangeListener { _, isChecked ->
+            // Moving the switch from code re-enters this listener; without the
+            // guard a refused enable ran the disable branch (a second toast), and
+            // Save armed the alarm twice.
+            if (settingSwitch) return@setOnCheckedChangeListener
             if (isChecked) {
                 if (Prefs.clientKey(this) == null || Prefs.playlistUri(this).isBlank()) {
                     toast("Save your settings first")
-                    binding.switchAlarmEnabled.isChecked = false
+                    setSwitchSilently(false)
                     return@setOnCheckedChangeListener
                 }
                 if (!AlarmScheduler.canScheduleExact(this)) {
                     toast("Grant \"Alarms & reminders\" permission first")
-                    binding.switchAlarmEnabled.isChecked = false
+                    setSwitchSilently(false)
                     startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
                     return@setOnCheckedChangeListener
                 }
                 Prefs.setAlarmEnabled(this, true)
-                AlarmScheduler.scheduleNext(this)
-                Prefs.markScheduled(this)
-                toast("Alarm enabled")
+                if (AlarmScheduler.scheduleNext(this)) {
+                    Prefs.markScheduled(this)
+                    toast("Alarm enabled")
+                } else {
+                    toast("Couldn't arm the alarm \u2014 check \"Alarms & reminders\" for this app")
+                }
             } else {
                 Prefs.setAlarmEnabled(this, false)
                 AlarmScheduler.cancel(this)
@@ -339,7 +416,13 @@ class MainActivity : AppCompatActivity() {
         binding.btnRunNow.setOnClickListener { doRunNow() }
         binding.btnExportSettings.setOnClickListener { exportSettings.launch(Backup.suggestedName()) }
         binding.btnImportSettings.setOnClickListener { importSettings.launch(arrayOf("application/json", "*/*")) }
-        binding.btnUpdate.setOnClickListener { checkForUpdate(force = true) }
+        // A rebuilt screen (after a restore) must still offer a downloaded update.
+        if (pendingUpdate?.exists() == true) binding.btnUpdate.text = "Install update"
+        binding.btnUpdate.setOnClickListener {
+            val ready = pendingUpdate
+            if (ready != null && ready.exists()) installUpdate(ready) else checkForUpdate(force = true)
+        }
+        binding.btnRestoreCopy.setOnClickListener { offerRestoreCopy() }
         binding.btnViewLog.setOnClickListener { showDebugLog() }
         binding.btnViewLog.setOnLongClickListener {
             DebugLog.clear()
@@ -395,7 +478,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun currentDaysMask(): Int {
         var mask = 0
-        dayChips.forEach { (chip, dayOfWeek) ->
+        dayChips().forEach { (chip, dayOfWeek) ->
             if (chip.isChecked) mask = mask or (1 shl (dayOfWeek - Calendar.SUNDAY))
         }
         return mask
@@ -433,7 +516,14 @@ class MainActivity : AppCompatActivity() {
             val h = Prefs.alarmHour(this)
             val m = Prefs.alarmMinute(this)
             val days = formatDaysMask(Prefs.alarmDaysMask(this))
-            setStatus(binding.statusSchedule, "\u2713 Scheduled at %02d:%02d \u2014 $days".format(h, m), StatusKind.SUCCESS)
+            if (Prefs.nextAlarmAt(this) > 0L) {
+                setStatus(binding.statusSchedule, "\u2713 Scheduled at %02d:%02d \u2014 $days".format(h, m), StatusKind.SUCCESS)
+            } else {
+                // Saved, but AlarmManager refused the last arm (the exact-alarm
+                // permission): a green line here would be a lie the user finds
+                // out about the next morning.
+                setStatus(binding.statusSchedule, "\u2717 Saved for %02d:%02d but NOT armed \u2014 grant \"Alarms & reminders\" and tap Save again".format(h, m), StatusKind.ERROR)
+            }
         } else {
             setStatus(binding.statusSchedule, "Not scheduled yet", StatusKind.NEUTRAL)
         }
@@ -621,10 +711,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         Prefs.setAlarmEnabled(this, true)
-        binding.switchAlarmEnabled.isChecked = true
-        AlarmScheduler.scheduleNext(this)
+        setSwitchSilently(true)
+        val armed = AlarmScheduler.scheduleNext(this)
         Prefs.markScheduled(this)
         refreshAllStatuses()
+        if (!armed) {
+            toast("Saved, but the alarm could not be armed \u2014 check \"Alarms & reminders\" for this app")
+            return
+        }
         if (mac.isBlank()) {
             toast("Alarm scheduled \u2014 no MAC set, so this won't wake an already-off TV. Find the MAC in the TV's own Settings > Network menu and add it here when you can.")
         } else {

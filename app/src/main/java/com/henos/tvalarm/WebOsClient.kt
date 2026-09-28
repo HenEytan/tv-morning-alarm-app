@@ -27,7 +27,7 @@ import javax.net.ssl.X509TrustManager
  *
  * Older webOS firmware accepts plain ws:// on port 3000. Many updated
  * firmwares (including older TVs after a software update) only accept
- * wss:// (TLS, self-signed cert) on port 3001. We try both, in order.
+ * wss:// (TLS, self-signed cert) on port 3001. We try both, wss:// first.
  *
  * Every step is written to DebugLog so a failure can be diagnosed from
  * one copy-pasted log instead of trial-and-error screenshots.
@@ -43,9 +43,14 @@ object WebOsClient {
 
     private data class Endpoint(val url: String, val secure: Boolean)
 
+    // wss:// first: the pairing key travels in every registration frame, and on
+    // the plain endpoint it crosses the LAN in cleartext. The TLS endpoint is
+    // self-signed and unpinned (see secureClient) — still opaque to a passive
+    // listener, which cleartext is not. ws:// stays as the fallback for firmware
+    // that has no 3001.
     private fun endpointsFor(ip: String) = listOf(
-        Endpoint("ws://$ip:3000", secure = false),
         Endpoint("wss://$ip:3001", secure = true),
+        Endpoint("ws://$ip:3000", secure = false),
     )
 
     // ---- Wake on LAN --------------------------------------------------
@@ -296,7 +301,7 @@ object WebOsClient {
 
     // ---- Pairing --------------------------------------------------------
 
-    /** Blocking. Call from a background thread. Tries ws:// then wss://. Returns the client-key, or null. */
+    /** Blocking. Call from a background thread. Tries wss:// then ws://. Returns the client-key, or null. */
     fun pair(ip: String, onNeedsTvPrompt: () -> Unit): String? {
         DebugLog.section("PAIR START ip=$ip")
         lastPairError = null
@@ -394,7 +399,7 @@ object WebOsClient {
 
     /**
      * Opens a socket, registers with the stored client-key, sends ONE request and
-     * returns how it went. Tries ws:// then wss://.
+     * returns how it went. Tries wss:// then ws://.
      *
      * Important: a "response" that arrives BEFORE we are "registered" is the TV asking
      * us to pair again (our key is no longer trusted). Older code treated that as a
