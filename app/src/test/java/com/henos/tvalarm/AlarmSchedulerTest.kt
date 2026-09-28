@@ -96,4 +96,28 @@ class AlarmSchedulerTest {
             assertEquals(dow, next.get(Calendar.DAY_OF_WEEK))
         }
     }
+
+    // Israel springs forward on Friday 2026-03-27: 02:00 becomes 03:00, so 02:30 does not exist that day.
+
+    @Test
+    fun steppingIntoTheSpringForwardGapIsNotAnHourEarly() {
+        val now = at(2026, 3, 26, 23, 0)
+        val next = AlarmScheduler.nextTrigger(2, 30, Prefs.ALL_DAYS_MASK, now)
+        assertEquals(at(2026, 3, 27, 3, 30).timeInMillis, next.timeInMillis)
+    }
+
+    @Test
+    fun theDayAfterTheGapIsBackAtTheSetTime() {
+        // The alarm that rang at the resolved 03:30 re-arms for 02:30 tomorrow, not 03:30.
+        val now = at(2026, 3, 27, 3, 30, 5)
+        val next = AlarmScheduler.nextTrigger(2, 30, Prefs.ALL_DAYS_MASK, now)
+        assertEquals(at(2026, 3, 28, 2, 30).timeInMillis, next.timeInMillis)
+    }
+
+    @Test
+    fun skippedDaysAfterTheGapKeepTheSetTime() {
+        val now = at(2026, 3, 27, 3, 30, 5) // Friday
+        val next = AlarmScheduler.nextTrigger(2, 30, mask(Calendar.MONDAY), now)
+        assertEquals(at(2026, 3, 30, 2, 30).timeInMillis, next.timeInMillis)
+    }
 }
