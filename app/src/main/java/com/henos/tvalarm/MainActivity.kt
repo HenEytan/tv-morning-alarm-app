@@ -125,6 +125,39 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Put the newest on-device daily copy back — the one taken before the last
+     * restore, or yesterday's. Confirmed first, with its date: this replaces the
+     * settings on screen, and a copy of those is taken before anything moves.
+     */
+    private fun offerRestoreCopy() {
+        val newest = Backup.copies(this).firstOrNull()
+        if (newest == null) {
+            setStatus(binding.statusBackup, "No on-device copy yet \u2014 one is taken once a day.", StatusKind.NEUTRAL)
+            return
+        }
+        val at = Backup.instantOf(newest.name) ?: 0L
+        AlertDialog.Builder(this)
+            .setTitle("Restore the on-device copy?")
+            .setMessage("Puts back the settings copied on ${timeFmt.format(Date(at))}. A copy of what is here now is taken first, so this is reversible.")
+            .setPositiveButton("Restore") { _, _ ->
+                val ok = Backup.restoreLatest(this)
+                if (ok) {
+                    val armed = AlarmScheduler.rearm(this, "restore-copy")
+                    setupUi()
+                    setStatus(
+                        binding.statusBackup,
+                        if (armed) "On-device copy restored and the alarm re-armed." else "On-device copy restored.",
+                        StatusKind.SUCCESS,
+                    )
+                } else {
+                    setStatus(binding.statusBackup, "Couldn't restore that copy. Nothing was changed.", StatusKind.ERROR)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     /** Put a picked settings file back, after copying what is here now. */
     private fun restoreFrom(uri: android.net.Uri) {
         // The guard first: restoring the wrong file must itself be reversible.
@@ -211,8 +244,17 @@ class MainActivity : AppCompatActivity() {
                         StatusKind.ERROR,
                     )
                     verdict == Updater.Installability.OK -> {
+                        // Downloaded and checked, but NOT installed until asked: the
+                        // install confirmation Android shows can only be launched from
+                        // the foreground (Android 14 blocks it from a receiver), and
+                        // an alarm app must not replace itself under the user.
                         pendingUpdate = apk
-                        installUpdate(apk)
+                        binding.btnUpdate.text = "Install build ${release.versionCode}"
+                        setStatus(
+                            binding.statusUpdate,
+                            "Build ${release.versionCode} is downloaded and checked. Tap Install when you're ready \u2014 the app restarts.",
+                            StatusKind.SUCCESS,
+                        )
                     }
                     verdict == Updater.Installability.WRONG_SIGNER -> setStatus(
                         binding.statusUpdate,
@@ -374,7 +416,13 @@ class MainActivity : AppCompatActivity() {
         binding.btnRunNow.setOnClickListener { doRunNow() }
         binding.btnExportSettings.setOnClickListener { exportSettings.launch(Backup.suggestedName()) }
         binding.btnImportSettings.setOnClickListener { importSettings.launch(arrayOf("application/json", "*/*")) }
-        binding.btnUpdate.setOnClickListener { checkForUpdate(force = true) }
+        // A rebuilt screen (after a restore) must still offer a downloaded update.
+        if (pendingUpdate?.exists() == true) binding.btnUpdate.text = "Install update"
+        binding.btnUpdate.setOnClickListener {
+            val ready = pendingUpdate
+            if (ready != null && ready.exists()) installUpdate(ready) else checkForUpdate(force = true)
+        }
+        binding.btnRestoreCopy.setOnClickListener { offerRestoreCopy() }
         binding.btnViewLog.setOnClickListener { showDebugLog() }
         binding.btnViewLog.setOnLongClickListener {
             DebugLog.clear()
