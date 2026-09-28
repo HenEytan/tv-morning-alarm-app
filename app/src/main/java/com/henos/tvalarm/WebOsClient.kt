@@ -306,21 +306,33 @@ object WebOsClient {
         DebugLog.section("PAIR START ip=$ip")
         lastPairError = null
         for (endpoint in endpointsFor(ip)) {
-            val result = pairOverEndpoint(endpoint, onNeedsTvPrompt)
-            if (result != null) {
+            val attempt = pairOverEndpoint(endpoint, onNeedsTvPrompt)
+            if (attempt.key != null) {
                 DebugLog.log(TAG, "pair: SUCCESS via ${endpoint.url}")
-                return result
+                return attempt.key
+            }
+            // The TV itself said no (the user declined the prompt, or the TV
+            // refuses pairing): trying the other port would only put a SECOND
+            // prompt on the screen the user just answered. Only a connection
+            // failure or a timeout is worth the other endpoint.
+            if (attempt.answeredByTv) {
+                DebugLog.log(TAG, "pair: the TV refused over ${endpoint.url} - not trying the other endpoint")
+                break
             }
         }
         DebugLog.log(TAG, "pair: FAILED over all endpoints. lastPairError=$lastPairError")
         return null
     }
 
-    private fun pairOverEndpoint(endpoint: Endpoint, onNeedsTvPrompt: () -> Unit): String? {
+    /** One endpoint's answer: the key, or whether the TV itself refused (an `error` frame). */
+    private class PairAttempt(val key: String?, val answeredByTv: Boolean)
+
+    private fun pairOverEndpoint(endpoint: Endpoint, onNeedsTvPrompt: () -> Unit): PairAttempt {
         DebugLog.log(TAG, "pairOverEndpoint: trying ${endpoint.url}")
         val client = clientFor(endpoint.secure)
         val latch = CountDownLatch(1)
         var result: String? = null
+        var refused = false
         val request = Request.Builder().url(endpoint.url).build()
         val ws = try {
             client.newWebSocket(request, object : WebSocketListener() {
@@ -349,6 +361,7 @@ object WebOsClient {
                         }
                         "error" -> {
                             lastPairError = "${endpoint.url}: ${resp.optString("error", resp.toString())}"
+                            refused = true
                             latch.countDown()
                         }
                         "response" -> {
@@ -377,7 +390,7 @@ object WebOsClient {
         } catch (e: Exception) {
             lastPairError = "${endpoint.url}: ${e.message}"
             DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
-            return null
+            return PairAttempt(null, answeredByTv = false)
         }
         val completed = latch.await(90, TimeUnit.SECONDS)
         if (!completed) {
@@ -385,7 +398,7 @@ object WebOsClient {
             DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for registered/error response")
         }
         release(ws, graceful = completed)
-        return result
+        return PairAttempt(result, answeredByTv = refused && result == null)
     }
 
     // ---- Generic authenticated SSAP request --------------------------------

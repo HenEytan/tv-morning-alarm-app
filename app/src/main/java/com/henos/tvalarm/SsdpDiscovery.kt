@@ -53,6 +53,12 @@ object SsdpDiscovery {
                 val buf = ByteArray(4096)
                 val deadline = System.currentTimeMillis() + timeoutMs
                 var totalResponses = 0
+                // Every responder answers `ssdp:all` once per service it offers —
+                // a router or a speaker five or ten times, usually with the same
+                // LOCATION. Each description is fetched once and its answer reused:
+                // fetching it again for every answer meant up to 3 s per answer from
+                // every non-LG device, and a scan meant to take 4 s could take a minute.
+                val described = HashMap<String, Description?>()
                 while (System.currentTimeMillis() < deadline) {
                     try {
                         val packet = DatagramPacket(buf, buf.size)
@@ -75,15 +81,16 @@ object SsdpDiscovery {
                         if (location != null && !sameHost(location, ip)) {
                             DebugLog.log(TAG, "device $ip: ignoring LOCATION on another host ($location)")
                         } else if (location != null) {
-                            try {
-                                val xml = fetchXml(location)
-                                if (xml != null) {
-                                    friendlyName = Regex("<friendlyName>(.*?)</friendlyName>").find(xml)?.groupValues?.get(1)
-                                    val manufacturer = Regex("<manufacturer>(.*?)</manufacturer>").find(xml)?.groupValues?.get(1) ?: ""
-                                    if (manufacturer.contains("LG", ignoreCase = true)) isLg = true
-                                }
-                            } catch (e: Exception) {
-                                DebugLog.log(TAG, "device $ip: failed fetching description XML from $location - ${e.message}")
+                            // Not getOrPut: it treats a stored null (a failed fetch) as
+                            // missing and would fetch again, which is the cost avoided here.
+                            val description = if (location in described) {
+                                described[location]
+                            } else {
+                                describe(ip, location).also { described[location] = it }
+                            }
+                            if (description != null) {
+                                friendlyName = description.friendlyName
+                                if (description.manufacturer.contains("LG", ignoreCase = true)) isLg = true
                             }
                         }
 
@@ -114,6 +121,21 @@ object SsdpDiscovery {
             null
         }
         return host != null && host.trim('[', ']').equals(ip, ignoreCase = true)
+    }
+
+    private class Description(val friendlyName: String?, val manufacturer: String)
+
+    /** The device description at [location], or null when it could not be read. */
+    private fun describe(ip: String, location: String): Description? = try {
+        fetchXml(location)?.let { xml ->
+            Description(
+                friendlyName = Regex("<friendlyName>(.*?)</friendlyName>").find(xml)?.groupValues?.get(1),
+                manufacturer = Regex("<manufacturer>(.*?)</manufacturer>").find(xml)?.groupValues?.get(1) ?: "",
+            )
+        }
+    } catch (e: Exception) {
+        DebugLog.log(TAG, "device $ip: failed fetching description XML from $location - ${e.message}")
+        null
     }
 
     private fun fetchXml(url: String): String? {
