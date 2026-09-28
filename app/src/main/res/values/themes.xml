@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.TvAlarm" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <!-- Light, not DayNight. Every colour below is a light-theme value and there
+         is no values-night/ to pair with it, so under DayNight a phone in dark
+         mode drew the theme's light-on-dark text (the time picker's digits, what
+         is typed into the fields) on these white cards: invisible. One palette,
+         applied the same way in both system modes, until a dark one is designed. -->
+    <style name="Theme.TvAlarm" parent="Theme.MaterialComponents.Light.NoActionBar">
         <item name="colorPrimary">@color/brand_primary</item>
         <item name="colorPrimaryDark">@color/brand_primary_dark</item>
         <item name="colorAccent">@color/brand_secondary</item>
@@ -23,7 +28,7 @@
     <style name="SectionTitle">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:textSize">14sp</item>
+        <item name="android:textSize">@dimen/text_section</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textAllCaps">true</item>
         <item name="android:letterSpacing">0.05</item>
@@ -32,7 +37,7 @@
     </style>
 
     <style name="StatusLine">
-        <item name="android:textSize">13sp</item>
+        <item name="android:textSize">@dimen/text_status</item>
         <item name="android:textColor">@color/text_secondary</item>
         <item name="android:layout_marginTop">6dp</item>
         <item name="android:layout_marginStart">4dp</item>
@@ -72,6 +77,6 @@
         <item name="android:textColor">@color/chip_text_selector</item>
         <item name="checkedIconVisible">false</item>
         <item name="chipStrokeWidth">0dp</item>
-        <item name="android:textSize">12sp</item>
+        <item name="android:textSize">@dimen/text_caption</item>
     </style>
 </resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android TV / Google TV: overscan-safe margins and text readable at ten feet. -->
+<resources>
+    <dimen name="screen_padding_horizontal">48dp</dimen>
+    <dimen name="screen_padding_vertical">27dp</dimen>
+    <dimen name="text_caption">16sp</dimen>
+    <dimen name="text_status">16sp</dimen>
+    <dimen name="text_section">18sp</dimen>
+</resources>

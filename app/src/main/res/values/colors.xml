@@ -7,8 +7,12 @@
     <color name="surface_card">#FFFFFF</color>
     <color name="surface_background">#F5F5FA</color>
     <color name="text_primary">#1C1B1F</color>
-    <color name="text_secondary">#6B7280</color>
-    <color name="status_success">#16A34A</color>
+    <!-- #4B5563, not #6B7280: the old grey was 4.45:1 on surface_background
+         (the unticked day chips), under WCAG AA's 4.5:1 for text this small. -->
+    <color name="text_secondary">#4B5563</color>
+    <!-- #15803D (5.0:1 on white), not #16A34A (3.3:1): the green status lines
+         are 13sp text, and AA asks 4.5:1 of text that size. -->
+    <color name="status_success">#15803D</color>
     <color name="status_error">#DC2626</color>
     <color name="status_neutral">#6B7280</color>
 </resources>
