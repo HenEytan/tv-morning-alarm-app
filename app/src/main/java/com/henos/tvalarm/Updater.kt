@@ -221,10 +221,39 @@ object Updater {
         // the one failure this exists to prevent gets through.
         if (mine.isEmpty() || theirs.isEmpty() || mine != theirs) return Installability.WRONG_SIGNER
 
-        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) downloaded.longVersionCode
-        else @Suppress("DEPRECATION") downloaded.versionCode.toLong()
-        if (code < installedVersionCode(context)) return Installability.DOWNGRADE
+        if (versionCodeOf(downloaded) < installedVersionCode(context)) return Installability.DOWNGRADE
         return Installability.OK
+    }
+
+    private fun versionCodeOf(info: PackageInfo): Long =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
+        else @Suppress("DEPRECATION") info.versionCode.toLong()
+
+    /** A download already on disk and still worth installing: the file and its versionCode. */
+    data class Cached(val apk: File, val versionCode: Long)
+
+    /**
+     * The update downloaded earlier, if it is still newer than what is running
+     * and still passes [installability]. The offer used to live only in the
+     * screen that downloaded it, so turning the phone (a new screen) forgot it
+     * and the next tap downloaded the same APK again. Anything else found there —
+     * the build that has since been installed, a refused one — is deleted rather
+     * than left in the cache. Blocking; call it off the main thread.
+     */
+    fun cachedUpdate(context: Context): Cached? {
+        val apk = File(File(context.cacheDir, DIR), "update.apk")
+        if (!apk.exists()) return null
+        val code = try {
+            val info = context.packageManager.getPackageArchiveInfo(apk.path, 0)
+            if (info != null && installability(context, apk) == Installability.OK) versionCodeOf(info) else -1L
+        } catch (e: Exception) {
+            -1L
+        }
+        if (code <= installedVersionCode(context)) {
+            apk.delete()
+            return null
+        }
+        return Cached(apk, code)
     }
 
     @Suppress("DEPRECATION")

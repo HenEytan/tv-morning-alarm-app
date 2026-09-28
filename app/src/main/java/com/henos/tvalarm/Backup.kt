@@ -16,8 +16,9 @@ import java.io.File
  * TWO COPIES, and they answer different things:
  *
  *   · [autoBackupIfDue] keeps a copy in the app's own files, one a day, three
- *     kept. It answers "I changed the wrong setting" and it goes away with the
- *     app, because Android deletes an app's files with the app.
+ *     kept (plus the guard copies a restore takes, see [Kind]). It answers "I
+ *     changed the wrong setting" and it goes away with the app, because
+ *     Android deletes an app's files with the app.
  *   · [encode] written to a file the user picks is the copy that survives the
  *     phone. That one is the point of the feature.
  *
@@ -38,7 +39,7 @@ object Backup {
     const val VERSION = 1
     const val APP = "tv-morning-alarm"
 
-    /** Where the daily copies live, and how many. */
+    /** Where the on-device copies live, and how many daily ones are kept. */
     private const val DIR = "auto_backups"
     const val KEEP = 3
     const val EVERY_MS = 24L * 60 * 60 * 1000
@@ -149,11 +150,30 @@ object Backup {
     /** Read a URI the picker returned. Bounded — a settings file is under a kilobyte. */
     fun readFrom(context: Context, uri: Uri): Read = try {
         val text = context.contentResolver.openInputStream(uri).use { input ->
-            requireNotNull(input).readBytes().take(256 * 1024).toByteArray().toString(Charsets.UTF_8)
+            readBounded(requireNotNull(input), MAX_FILE_BYTES).toString(Charsets.UTF_8)
         }
         decode(text)
     } catch (e: Exception) {
         Read.Bad(Problem.UNREADABLE)
+    }
+
+    /** A settings file is under a kilobyte; anything past this is not one. */
+    private const val MAX_FILE_BYTES = 256 * 1024
+
+    /**
+     * At most [limit] bytes of [input]. The old read pulled the WHOLE stream into
+     * memory and then kept the first 256 KB, so picking a large file by mistake
+     * (a video) could run the app out of memory before the limit applied.
+     */
+    fun readBounded(input: java.io.InputStream, limit: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(8 * 1024)
+        while (out.size() < limit) {
+            val n = input.read(buf, 0, minOf(buf.size, limit - out.size()))
+            if (n < 0) break
+            out.write(buf, 0, n)
+        }
+        return out.toByteArray()
     }
 
     /** `alarm-settings-<date>.json` — a day, and nothing about the TV. */
@@ -162,19 +182,37 @@ object Backup {
         return "alarm-settings-$d.json"
     }
 
-    // --- the daily copy ----------------------------------------------------
+    // --- the on-device copies ----------------------------------------------
 
     private fun dir(context: Context) = File(context.filesDir, DIR).apply { mkdirs() }
 
-    fun nameFor(atMs: Long) = "auto-$atMs.json"
+    /**
+     * Two kinds of copy share the folder, and are kept apart by name:
+     *
+     *   · `auto-<ms>.json`, the daily copy — [KEEP] kept;
+     *   · `guard-<ms>.json`, taken right before a restore — [KEEP_GUARDS] kept.
+     *
+     * They used to be one kind. Then the guard taken by a restore also counted as
+     * "today's copy" — the next daily copy moved a day later — and it evicted the
+     * oldest daily copy, the one from before the mistake being undone.
+     */
+    enum class Kind(val prefix: String) { DAILY("auto-"), GUARD("guard-") }
+
+    const val KEEP_GUARDS = 2
+
+    fun nameFor(atMs: Long, kind: Kind = Kind.DAILY) = "${kind.prefix}$atMs.json"
+
+    /** Which kind [name] is, or null for a file this code did not write. */
+    fun kindOf(name: String): Kind? =
+        Kind.values().firstOrNull { name.startsWith(it.prefix) && name.endsWith(".json") }
+            ?.takeIf { instantOf(name) != null }
 
     /** The instant [nameFor] encoded, or null for a file this did not write. */
-    fun instantOf(name: String): Long? =
-        if (name.startsWith("auto-") && name.endsWith(".json")) {
-            name.substring(5, name.length - 5).toLongOrNull()
-        } else {
-            null
-        }
+    fun instantOf(name: String): Long? {
+        val kind = Kind.values().firstOrNull { name.startsWith(it.prefix) } ?: return null
+        if (!name.endsWith(".json")) return null
+        return name.substring(kind.prefix.length, name.length - 5).toLongOrNull()
+    }
 
     /**
      * Is a copy due? A clock that moved BACKWARDS answers true — a phone whose
@@ -184,16 +222,21 @@ object Backup {
     fun due(lastMs: Long, nowMs: Long, everyMs: Long = EVERY_MS): Boolean =
         lastMs <= 0L || nowMs < lastMs || nowMs - lastMs >= everyMs
 
-    /** Which names to delete once [KEEP] are kept, newest first. */
-    fun evict(names: List<String>, keep: Int = KEEP): List<String> =
-        names.filter { instantOf(it) != null }
-            .sortedByDescending { instantOf(it)!! }
-            .drop(keep)
+    /**
+     * Which names to delete, newest first within each kind: [keep] daily copies
+     * and [keepGuards] guard copies stay. A guard never evicts a daily copy.
+     */
+    fun evict(names: List<String>, keep: Int = KEEP, keepGuards: Int = KEEP_GUARDS): List<String> =
+        Kind.values().flatMap { kind ->
+            names.filter { kindOf(it) == kind }
+                .sortedByDescending { instantOf(it)!! }
+                .drop(if (kind == Kind.GUARD) keepGuards else keep)
+        }
 
-    /** The copies on disk, newest first. */
+    /** The copies on disk, both kinds, newest first. */
     fun copies(context: Context): List<File> =
         dir(context).listFiles().orEmpty()
-            .filter { instantOf(it.name) != null }
+            .filter { kindOf(it.name) != null }
             .sortedByDescending { instantOf(it.name)!! }
 
     /**
@@ -203,18 +246,23 @@ object Backup {
     fun autoBackupIfDue(context: Context, nowMs: Long = System.currentTimeMillis()): Boolean {
         val prefs = Prefs.get(context)
         if (!due(prefs.getLong(LAST_KEY, 0L), nowMs)) return false
-        return takeNow(context, nowMs)
+        return takeNow(context, nowMs, Kind.DAILY)
     }
 
-    /** Take one regardless of the schedule — the guard before a restore. */
-    fun takeNow(context: Context, nowMs: Long = System.currentTimeMillis()): Boolean = try {
+    /**
+     * Take one regardless of the schedule. Only a DAILY copy moves the daily
+     * schedule: a guard is extra, and must not postpone tomorrow's copy.
+     */
+    @Synchronized
+    fun takeNow(context: Context, nowMs: Long = System.currentTimeMillis(), kind: Kind = Kind.GUARD): Boolean = try {
         val d = dir(context)
-        // Written then renamed: nothing named auto-*.json was ever a partial write.
-        val tmp = File(d, "${nameFor(nowMs)}.part")
-        tmp.writeText(encode(context))
-        val target = File(d, nameFor(nowMs))
-        if (!tmp.renameTo(target)) { target.writeText(encode(context)); tmp.delete() }
-        Prefs.get(context).edit().putLong(LAST_KEY, nowMs).apply()
+        val text = encode(context)
+        // Written then renamed: nothing named *.json here was ever a partial write.
+        val target = File(d, nameFor(nowMs, kind))
+        val tmp = File(d, "${target.name}.part")
+        tmp.writeText(text)
+        if (!tmp.renameTo(target)) { target.writeText(text); tmp.delete() }
+        if (kind == Kind.DAILY) Prefs.get(context).edit().putLong(LAST_KEY, nowMs).apply()
         // Evict AFTER the new one lands: deleting first and then failing to
         // write would have spent a copy for nothing.
         for (old in evict(d.list().orEmpty().toList())) File(d, old).delete()
@@ -223,17 +271,49 @@ object Backup {
         false
     }
 
+    /** The settings a copy holds, or null if it cannot be read. */
+    fun settingsIn(file: File): JSONObject? = try {
+        (decode(file.readText()) as? Read.Ok)?.settings
+    } catch (e: Exception) {
+        null
+    }
+
+    /** The settings as they are on this device now, in the form a copy holds them. */
+    fun currentSettings(context: Context): JSONObject =
+        JSONObject(encode(context)).getJSONObject("settings")
+
     /**
-     * Put the newest daily copy back, after taking one of what is here now — so
-     * restoring the wrong thing is itself reversible. Returns false when there
-     * is nothing to restore, or when that guard copy could not be written.
+     * Would restoring [a] over [b] change anything? Compared field by field, over
+     * exactly what a backup carries, after the same clamping [apply] does — so a
+     * copy that differs only in a value [apply] would correct reads as the same.
+     * Pure; tested.
      */
-    fun restoreLatest(context: Context): Boolean {
-        val newest = copies(context).firstOrNull() ?: return false
-        if (!takeNow(context)) return false
-        return when (val read = decode(newest.readText())) {
-            is Read.Ok -> { apply(context, read.settings); true }
-            is Read.Bad -> false
-        }
+    fun sameSettings(a: JSONObject, b: JSONObject): Boolean =
+        STRINGS.all { a.optString(it, "") == b.optString(it, "") } &&
+            INTS.all { sanitizeInt(it, a.optInt(it, defaultInt(it))) == sanitizeInt(it, b.optInt(it, defaultInt(it))) } &&
+            BOOLS.all { a.optBoolean(it, true) == b.optBoolean(it, true) }
+
+    /**
+     * The copy worth offering: the newest one whose settings DIFFER from what is
+     * here now. The newest copy is usually the one taken at this launch — the
+     * current settings — and restoring it changes nothing, which is what the
+     * button used to do for most of the day. After a restore the guard copy is
+     * the newest that differs, so a second tap undoes the first.
+     */
+    fun restoreCandidate(context: Context): File? {
+        val now = currentSettings(context)
+        return copies(context).firstOrNull { f -> settingsIn(f)?.let { !sameSettings(it, now) } ?: false }
+    }
+
+    /**
+     * Put [file] back, after taking a guard copy of what is here now — so
+     * restoring the wrong thing is itself reversible. Returns false, and changes
+     * nothing, when the copy cannot be read or the guard could not be written.
+     */
+    fun restore(context: Context, file: File): Boolean {
+        val settings = settingsIn(file) ?: return false
+        if (!takeNow(context, kind = Kind.GUARD)) return false
+        apply(context, settings)
+        return true
     }
 }
