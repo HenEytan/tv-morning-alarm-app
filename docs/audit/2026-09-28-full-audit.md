@@ -92,3 +92,35 @@ Using the last entry of `signingCertificateHistory` matches the documented order
 - No device or emulator run. The Doze and expedited-work behaviour (F7), the Android TV launcher visibility (F13), the background install prompt (F14), and whether the signature check works on API 26-27 are reasoned from platform documentation, not observed.
 - Whether the CI signing secrets are currently set (F9 applies only if they are not) is unknown; repository secrets are not readable.
 - webOS protocol behaviour (which frames carry `client-key` beyond `registered`, and TV certificate stability for pinning) was not tested against a TV.
+
+## Fix status (2026-09-28)
+
+Branch `claude/repo-pr-review-audit-yjympg`. Nothing here was compiled or run: the environment has no Android SDK and Google's Maven is blocked. Every Kotlin file was parsed with ktlint 1.5.0, every XML file with a parser, the workflow with a YAML parser, and the redaction regex was exercised with `java.util.regex` directly. The JVM unit tests added under `app/src/test` run in CI (`./gradlew testDebugUnitTest`), not here.
+
+| ID | Status | Where |
+|---|---|---|
+| F1 | **Fixed** — the release step runs only for a non-PR run on `main`; every other run uploads a workflow artifact and publishes nothing | `4b4e6ec` |
+| F2 | **Fixed** — `DebugLog.redact()` blanks every `client-key` value before a line is written; `clear()` also wipes the old unredacted SharedPreferences copy; `DebugLogTest` | `b188635` |
+| F3 | **Fixed** — `allowBackup="false"` | `b188635` |
+| F4 | **Fixed** — `dayChips()` is a function over the current binding | `943e041` |
+| F5 | **Fixed** — `restoreFrom` calls `AlarmScheduler.rearm`, which arms or cancels from the restored settings and the status line says which | `943e041` |
+| F6 | **Fixed** — `BootReceiver` handles `TIMEZONE_CHANGED` and `TIME_SET` through the same `rearm` path | `943e041` |
+| F7 | **Not fixed** — Plausible, not reproduced. Moving the run to a foreground service started from the receiver, or to `setAlarmClock`, changes the app's Doze behaviour in ways only a device can confirm; left for a session with one | — |
+| F8 | **Fixed** — Gradle wrapper 8.7 committed (generated offline from a Gradle 8.14.3 distribution; the distribution SHA-256 is not pinned because services.gradle.org is unreachable here to read it); JVM unit tests for `AlarmScheduler.nextTrigger`, `Prefs.isDaySelected`, `Backup` (decode, sanitize, due, evict, names), `Updater` (runNumberOf, parseRelease, checkDue), `DebugLog.redact`; CI runs the tests as a gate and `lintDebug` as an advisory step (no baseline could be established here) | `4b4e6ec`, `943e041` |
+| F9 | **Fixed** — a publishing run with no signing secrets fails; a non-publishing run builds debug as an artifact only | `4b4e6ec` |
+| F10 | **Fixed** — README release line, CI description, build steps; build.gradle comment names the root `keystore.properties` | `4b4e6ec`, this commit |
+| F11 | **Fixed** — "Restore the on-device copy" button, confirmed with the copy's date, through `Backup.restoreLatest` + `rearm` | `4627e87` |
+| F12 | **Fixed** — `Backup.sanitizeInt` clamps hour, minute, mask (never 0), volume; `BackupTest` | `943e041` |
+| F13 | **Fixed** — `LEANBACK_LAUNCHER`, `android:banner` (a layer-list drawable, not a 320×180 raster), non-required touchscreen/leanback features. Whether the launcher accepts a vector banner is unverified | `4627e87` |
+| F14 | **Fixed** — the download stays automatic, the install waits for a tap on "Install build N" and starts from the foreground | `4627e87` |
+| F15 | **Fixed** — `LAST_CHECK_KEY` written only after GitHub answered | `4627e87` |
+| F16 | **Fixed (guarded)** — a publishing run fails when its number is not above the latest `build-N` release, with `VERSION_CODE_OFFSET` as the documented recovery. The scheme itself (run number = versionCode) is kept, because the updater compares the tag number with the versionCode | `4b4e6ec` |
+| F17 | **Partly fixed** — `wss://3001` is tried first. Trust-on-first-use pinning is not added: it needs a TV to observe certificate stability against, and a wrong guess would lock every install out of its TV | `4627e87` |
+| F18 | **Fixed** — `scheduleNext`'s result is checked in Save, the switch and `rearm`; a refused arm clears `next_alarm_at` and the schedule line says "NOT armed"; the switch is moved through `setSwitchSilently` so its listener does not re-enter | `943e041` |
+| F19 | **Fixed** — `SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED` re-arms; `SCHEDULE_EXACT_ALARM` has `maxSdkVersion="32"` | `943e041` |
+| F20 | **Fixed** — `DatagramSocket().use`, `TvNetwork.bind`, LOCATION fetched only from the responder's own host | `4627e87` |
+| F21 | **Fixed** — `ArpUtil` deleted; the log is an append-only file cut back to its last 60 KB past 128 KB | `b188635` |
+| F22 | **Not fixed** — AGP / Kotlin / SDK / WorkManager bumps cannot be verified without a build; do them in a session that can run `assembleRelease` | — |
+| F23 | **Not fixed (accepted)** — the vendor `QUICKBOOT_POWERON` actions stay; the receiver is idempotent and gated on the enabled flag, and the receiver now also legitimately needs to be exported for the clock broadcasts | — |
+
+Fixed 19 of 23 (F16 guarded, F17 partly); not fixed 4 (F7, F22, F23, and the pinning half of F17).
