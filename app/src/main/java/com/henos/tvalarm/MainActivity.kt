@@ -126,22 +126,35 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Put the newest on-device daily copy back — the one taken before the last
-     * restore, or yesterday's. Confirmed first, with its date: this replaces the
-     * settings on screen, and a copy of those is taken before anything moves.
+     * Put an on-device copy back: the newest one that is not simply what is on
+     * screen now. The newest copy is usually the one taken at this launch, and
+     * restoring that changed nothing (second review R6). Confirmed first, with
+     * its date and kind: this replaces the settings on screen, and a copy of
+     * those is taken before anything moves — so a second tap undoes the first.
      */
     private fun offerRestoreCopy() {
-        val newest = Backup.copies(this).firstOrNull()
-        if (newest == null) {
-            setStatus(binding.statusBackup, "No on-device copy yet \u2014 one is taken once a day.", StatusKind.NEUTRAL)
+        val copy = Backup.restoreCandidate(this)
+        if (copy == null) {
+            val any = Backup.copies(this).isNotEmpty()
+            setStatus(
+                binding.statusBackup,
+                if (any) "Every on-device copy matches the settings on screen \u2014 nothing to restore."
+                else "No on-device copy yet \u2014 one is taken once a day.",
+                StatusKind.NEUTRAL,
+            )
             return
         }
-        val at = Backup.instantOf(newest.name) ?: 0L
+        val at = Backup.instantOf(copy.name) ?: 0L
+        val what = if (Backup.kindOf(copy.name) == Backup.Kind.GUARD) {
+            "the settings as they were before the restore on ${timeFmt.format(Date(at))}"
+        } else {
+            "the settings copied on ${timeFmt.format(Date(at))}"
+        }
         AlertDialog.Builder(this)
             .setTitle("Restore the on-device copy?")
-            .setMessage("Puts back the settings copied on ${timeFmt.format(Date(at))}. A copy of what is here now is taken first, so this is reversible.")
+            .setMessage("Puts back $what. A copy of what is here now is taken first, so this is reversible.")
             .setPositiveButton("Restore") { _, _ ->
-                val ok = Backup.restoreLatest(this)
+                val ok = Backup.restore(this, copy)
                 if (ok) {
                     val armed = AlarmScheduler.rearm(this, "restore-copy")
                     setupUi()
@@ -158,12 +171,23 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /** Put a picked settings file back, after copying what is here now. */
+    /**
+     * Put a picked settings file back. The file is read FIRST, and only a
+     * readable one is applied, after a guard copy of what is here now has been
+     * written — restoring the wrong file must itself be reversible, so a guard
+     * that could not be written refuses the restore rather than going ahead.
+     */
     private fun restoreFrom(uri: android.net.Uri) {
-        // The guard first: restoring the wrong file must itself be reversible.
-        Backup.takeNow(this)
         when (val read = Backup.readFrom(this, uri)) {
             is Backup.Read.Ok -> {
+                if (!Backup.takeNow(this, kind = Backup.Kind.GUARD)) {
+                    setStatus(
+                        binding.statusBackup,
+                        "Couldn't keep a copy of the current settings first, so nothing was restored.",
+                        StatusKind.ERROR,
+                    )
+                    return
+                }
                 Backup.apply(this, read.settings)
                 // The file may have changed the time, the days or the enabled flag,
                 // and the alarm armed in AlarmManager still carries the old ones:
@@ -212,6 +236,13 @@ class MainActivity : AppCompatActivity() {
      */
     private fun checkForUpdate(force: Boolean) {
         thread {
+            // A build downloaded before (by a screen since rebuilt, or an earlier
+            // launch) is offered again as it is, not fetched a second time.
+            val cached = Updater.cachedUpdate(this)
+            if (cached != null) {
+                runOnUiThread { offerInstall(cached.apk, cached.versionCode) }
+                return@thread
+            }
             val result = Updater.check(this, force = force)
             runOnUiThread {
                 when (result) {
@@ -243,19 +274,7 @@ class MainActivity : AppCompatActivity() {
                         "The download didn't finish. Nothing was changed.",
                         StatusKind.ERROR,
                     )
-                    verdict == Updater.Installability.OK -> {
-                        // Downloaded and checked, but NOT installed until asked: the
-                        // install confirmation Android shows can only be launched from
-                        // the foreground (Android 14 blocks it from a receiver), and
-                        // an alarm app must not replace itself under the user.
-                        pendingUpdate = apk
-                        binding.btnUpdate.text = "Install build ${release.versionCode}"
-                        setStatus(
-                            binding.statusUpdate,
-                            "Build ${release.versionCode} is downloaded and checked. Tap Install when you're ready \u2014 the app restarts.",
-                            StatusKind.SUCCESS,
-                        )
-                    }
+                    verdict == Updater.Installability.OK -> offerInstall(apk, release.versionCode)
                     verdict == Updater.Installability.WRONG_SIGNER -> setStatus(
                         binding.statusUpdate,
                         "Build ${release.versionCode} is signed with a different key, so Android won't replace " +
@@ -276,6 +295,22 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Downloaded and checked, but NOT installed until asked: the install
+     * confirmation Android shows can only be launched from the foreground
+     * (Android 14 blocks it from a receiver), and an alarm app must not replace
+     * itself under the user.
+     */
+    private fun offerInstall(apk: java.io.File, versionCode: Long) {
+        pendingUpdate = apk
+        binding.btnUpdate.text = "Install build $versionCode"
+        setStatus(
+            binding.statusUpdate,
+            "Build $versionCode is downloaded and checked. Tap Install when you're ready \u2014 the app restarts.",
+            StatusKind.SUCCESS,
+        )
     }
 
     private fun installUpdate(apk: java.io.File) {
@@ -434,7 +469,7 @@ class MainActivity : AppCompatActivity() {
             val showing = binding.macAdvancedSection.visibility == View.VISIBLE
             binding.macAdvancedSection.visibility = if (showing) View.GONE else View.VISIBLE
             binding.toggleMacAdvanced.text = if (showing)
-                "Advanced: set MAC for Wake-on-LAN (optional)" else "Hide advanced"
+                "Advanced: manual IP / MAC (optional)" else "Hide advanced"
         }
 
         binding.togglePlaylistAdvanced.setOnClickListener {
@@ -586,10 +621,14 @@ class MainActivity : AppCompatActivity() {
                 devices.size == 1 -> proceedWithIp(devices[0].ip)
                 devices.size > 1 -> runOnUiThread {
                     val labels = devices.map { "${it.name}  (${it.ip})" }.toTypedArray()
+                    // Cancelable, with a Cancel button: the dialog used to be neither,
+                    // so on a TV remote (Back does nothing to a non-cancelable
+                    // dialog) the only way out was to pick a TV, and Connect stayed
+                    // disabled until one was picked.
                     AlertDialog.Builder(this)
                         .setTitle("Select your TV")
-                        .setCancelable(false)
                         .setItems(labels) { _, which -> proceedWithIp(devices[which].ip) }
+                        .setNegativeButton("Cancel") { dialog, _ -> dialog.cancel() }
                         .setOnCancelListener { binding.btnConnect.isEnabled = true; binding.btnConnect.text = "Try Again"; refreshAllStatuses() }
                         .show()
                 }
@@ -807,6 +846,10 @@ class MainActivity : AppCompatActivity() {
         }
         val playlist = normalizePlaylistUri(binding.inputPlaylistUri.text.toString())
         binding.inputPlaylistUri.setText(playlist)
+        // No day ticked is not something to store: the scheduler reads a mask of 0
+        // as "every day" while the screen says "no days selected". Keep the saved
+        // days instead; Save is where the user is told to pick one.
+        val daysMask = currentDaysMask().takeIf { it != 0 } ?: Prefs.alarmDaysMask(this)
         Prefs.save(
             this,
             ip,
@@ -815,9 +858,14 @@ class MainActivity : AppCompatActivity() {
             binding.inputSpotifyAppId.text.toString().trim().ifBlank { "spotify-beehive" },
             binding.timePicker.hour,
             binding.timePicker.minute,
-            currentDaysMask(),
+            daysMask,
             binding.seekVolume.progress
         )
+        // Run Now saves the time and days on screen, so the alarm already armed in
+        // AlarmManager may now stand for other ones: the status line would show the
+        // new time while the old one rang. Bring it in line (a no-op when the alarm
+        // is off or was never scheduled).
+        AlarmScheduler.rearm(this, "run-now")
         setStatus(binding.statusRun, "Running\u2026", StatusKind.NEUTRAL)
         binding.btnRunNow.isEnabled = false
 

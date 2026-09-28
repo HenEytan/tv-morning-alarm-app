@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sizes that differ on a TV. The same screen serves a phone in the hand and an
+     Android TV box read from across the room (values-television/ overrides these
+     there): TV text is set larger, and the page keeps clear of the edges a TV may
+     overscan — Android TV's guidance is 48dp at the sides and 27dp top and bottom. -->
+<resources>
+    <dimen name="screen_padding_horizontal">16dp</dimen>
+    <dimen name="screen_padding_vertical">16dp</dimen>
+    <dimen name="text_caption">12sp</dimen>
+    <dimen name="text_status">13sp</dimen>
+    <dimen name="text_section">14sp</dimen>
+</resources>

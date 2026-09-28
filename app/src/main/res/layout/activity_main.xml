@@ -8,7 +8,10 @@
 
     <LinearLayout
         android:orientation="vertical"
-        android:padding="16dp"
+        android:paddingStart="@dimen/screen_padding_horizontal"
+        android:paddingEnd="@dimen/screen_padding_horizontal"
+        android:paddingTop="@dimen/screen_padding_vertical"
+        android:paddingBottom="@dimen/screen_padding_vertical"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
@@ -24,7 +27,7 @@
 
         <TextView
             android:text="Wakes your LG TV and starts Spotify, on a schedule you set"
-            android:textSize="13sp"
+            android:textSize="@dimen/text_status"
             android:textColor="@color/text_secondary"
             android:layout_marginBottom="4dp"
             android:layout_width="wrap_content"
@@ -35,7 +38,7 @@
         <TextView
             android:id="@+id/textVersion"
             android:text="Version"
-            android:textSize="12sp"
+            android:textSize="@dimen/text_caption"
             android:textColor="@color/text_secondary"
             android:layout_marginBottom="20dp"
             android:layout_width="wrap_content"
@@ -83,7 +86,7 @@
 
                     <TextView
                         android:text="Filled in automatically when Connect finds your TV. Only edit these if scanning doesn't find it, or to set the MAC manually for Wake-on-LAN."
-                        android:textSize="12sp"
+                        android:textSize="@dimen/text_caption"
                         android:textColor="@color/text_secondary"
                         android:layout_marginTop="4dp"
                         android:layout_width="match_parent"
@@ -212,7 +215,7 @@
 
                 <TextView
                     android:text="Repeat on"
-                    android:textSize="12sp"
+                    android:textSize="@dimen/text_caption"
                     android:textColor="@color/text_secondary"
                     android:layout_marginTop="8dp"
                     android:layout_marginBottom="6dp"
@@ -245,7 +248,7 @@
                 <TextView
                     android:id="@+id/labelVolume"
                     android:text="Wake-up volume: 15"
-                    android:textSize="12sp"
+                    android:textSize="@dimen/text_caption"
                     android:textColor="@color/text_secondary"
                     android:layout_marginTop="12dp"
                     android:layout_marginBottom="2dp"

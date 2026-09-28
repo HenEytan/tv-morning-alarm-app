@@ -90,4 +90,46 @@ class BackupTest {
         assertEquals(listOf("auto-1.json"), Backup.evict(names, keep = 3))
         assertEquals(emptyList<String>(), Backup.evict(names.take(2), keep = 3))
     }
+
+    @Test
+    fun guardCopiesAreTheirOwnKind() {
+        val g = Backup.nameFor(77L, Backup.Kind.GUARD)
+        assertEquals("guard-77.json", g)
+        assertEquals(77L, Backup.instantOf(g))
+        assertEquals(Backup.Kind.GUARD, Backup.kindOf(g))
+        assertEquals(Backup.Kind.DAILY, Backup.kindOf(Backup.nameFor(77L)))
+        assertNull(Backup.kindOf("guard-x.json"))
+        assertNull(Backup.kindOf("guard-5.json.part"))
+    }
+
+    @Test
+    fun aGuardNeverEvictsADailyCopy() {
+        // Second review R7: three daily copies and a burst of restores. The daily
+        // copies all stay; only the oldest guard beyond the guard quota goes.
+        val names = listOf("auto-1.json", "auto-2.json", "auto-3.json", "guard-4.json", "guard-5.json", "guard-6.json")
+        assertEquals(listOf("guard-4.json"), Backup.evict(names, keep = 3, keepGuards = 2))
+    }
+
+    private fun settings(hour: Int = 7, ip: String = "192.168.1.9", enabled: Boolean = true) =
+        JSONObject().put("tv_ip", ip).put("alarm_hour", hour).put("alarm_enabled", enabled)
+
+    @Test
+    fun sameSettingsComparesWhatABackupCarries() {
+        assertTrue(Backup.sameSettings(settings(), settings()))
+        assertFalse(Backup.sameSettings(settings(), settings(hour = 6)))
+        assertFalse(Backup.sameSettings(settings(), settings(ip = "192.168.1.10")))
+        assertFalse(Backup.sameSettings(settings(), settings(enabled = false)))
+        // Fields no backup carries do not make two copies differ …
+        assertTrue(Backup.sameSettings(settings().put("client_key", "a"), settings().put("client_key", "b")))
+        // … and neither does a value apply() would clamp to the same thing.
+        assertTrue(Backup.sameSettings(settings(hour = 23), settings(hour = 40)))
+    }
+
+    @Test
+    fun readBoundedStopsAtTheLimit() {
+        val big = java.io.ByteArrayInputStream(ByteArray(100_000) { 'x'.code.toByte() })
+        assertEquals(10_000, Backup.readBounded(big, 10_000).size)
+        val small = java.io.ByteArrayInputStream("abc".toByteArray())
+        assertEquals("abc", String(Backup.readBounded(small, 10_000)))
+    }
 }

@@ -10,16 +10,29 @@ object AlarmScheduler {
 
     private const val REQUEST_CODE = 1001
 
+    /** See [nextTrigger]: how close to the alarm minute the alarm's own re-arm counts as "passed". */
+    const val EARLY_FIRE_GUARD_SECONDS = 60
+
     /**
      * The next local occurrence of [hour]:[minute] on a selected day, from [now].
      *
-     * Anything within the next 60s counts as "already passed", so an alarm that
-     * fires a hair early can't re-arm for the same minute and ring twice. A
-     * [daysMask] of 0 selects every day (the UI never saves 0, and a restored 0
-     * is corrected by Backup before it is stored). Pure; tested.
+     * Anything within the next [graceSeconds] counts as "already passed". The
+     * default 60 s is the early-fire guard for the re-arm the ALARM itself does:
+     * an alarm that fires a hair early must not re-arm for the same minute and
+     * ring twice. A re-arm for any other reason (a clock or zone change, a boot,
+     * a restore) passes 0 — an NTP correction a few seconds before the alarm
+     * minute must keep today's alarm, not skip to tomorrow's. A [daysMask] of 0
+     * selects every day (the UI never saves 0, and a restored 0 is corrected by
+     * Backup before it is stored). Pure; tested.
      */
-    fun nextTrigger(hour: Int, minute: Int, daysMask: Int, now: Calendar = Calendar.getInstance()): Calendar {
-        val threshold = (now.clone() as Calendar).apply { add(Calendar.SECOND, 60) }
+    fun nextTrigger(
+        hour: Int,
+        minute: Int,
+        daysMask: Int,
+        now: Calendar = Calendar.getInstance(),
+        graceSeconds: Int = EARLY_FIRE_GUARD_SECONDS,
+    ): Calendar {
+        val threshold = (now.clone() as Calendar).apply { add(Calendar.SECOND, graceSeconds) }
         val next = (now.clone() as Calendar).apply {
             set(Calendar.HOUR_OF_DAY, hour)
             set(Calendar.MINUTE, minute)
@@ -35,10 +48,13 @@ object AlarmScheduler {
         return next
     }
 
-    /** Arms the next exact alarm. Returns false if the OS refused (exact-alarm permission missing). */
-    fun scheduleNext(context: Context): Boolean {
+    /**
+     * Arms the next exact alarm. Returns false if the OS refused (exact-alarm
+     * permission missing). [graceSeconds]: see [nextTrigger].
+     */
+    fun scheduleNext(context: Context, graceSeconds: Int = EARLY_FIRE_GUARD_SECONDS): Boolean {
         val daysMask = Prefs.alarmDaysMask(context)
-        val next = nextTrigger(Prefs.alarmHour(context), Prefs.alarmMinute(context), daysMask)
+        val next = nextTrigger(Prefs.alarmHour(context), Prefs.alarmMinute(context), daysMask, graceSeconds = graceSeconds)
 
         if (!canScheduleExact(context)) {
             DebugLog.log("AlarmScheduler", "scheduleNext: exact alarm permission NOT granted - cannot arm")
@@ -92,7 +108,9 @@ object AlarmScheduler {
                 false
             }
             else -> {
-                val ok = scheduleNext(context)
+                // Grace 0: this is not the alarm re-arming itself, so an alarm
+                // still ahead of us today — even seconds ahead — stays today's.
+                val ok = scheduleNext(context, graceSeconds = 0)
                 DebugLog.log(
                     tag,
                     if (ok) "rearm ($reason): alarm re-armed for ${Prefs.alarmHour(context)}:${Prefs.alarmMinute(context)}"
