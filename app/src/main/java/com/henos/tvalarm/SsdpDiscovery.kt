@@ -105,11 +105,15 @@ object SsdpDiscovery {
     }
 
     /** Does [url] point at [ip] itself? Anything unparseable answers false. */
-    fun sameHost(url: String, ip: String): Boolean = try {
-        val host = java.net.URI(url).host ?: return false
-        host.trim('[', ']').equals(ip, ignoreCase = true)
-    } catch (e: Exception) {
-        false
+    fun sameHost(url: String, ip: String): Boolean {
+        // A block body: `return` is not allowed inside an expression body, and
+        // the first version of this was written that way and never compiled.
+        val host = try {
+            java.net.URI(url).host
+        } catch (e: Exception) {
+            null
+        }
+        return host != null && host.trim('[', ']').equals(ip, ignoreCase = true)
     }
 
     private fun fetchXml(url: String): String? {
