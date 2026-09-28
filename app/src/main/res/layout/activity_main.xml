@@ -195,7 +195,16 @@
 
                 <TextView android:text="3 \u00b7 Schedule" style="@style/SectionTitle" />
 
-                <com.google.android.material.materialswitch.MaterialSwitch
+                <!-- SwitchMaterial, not MaterialSwitch. MaterialSwitch is the Material 3
+                     widget: its thumb and track resolve from M3 colour roles
+                     (colorOutline, colorSurfaceContainerHighest, ...) that this
+                     Theme.MaterialComponents (M2) theme does not define, so it drew a
+                     fully transparent switch — only the label was visible. Tinting it
+                     does not help (a tint recolours, it does not restore alpha).
+                     SwitchMaterial is the M2 switch and takes colorSecondary from the
+                     theme. showText/textOn/textOff stay off: SwitchCompat, which it
+                     extends, NPEs on some devices with track text on. -->
+                <com.google.android.material.switchmaterial.SwitchMaterial
                     android:id="@+id/switchAlarmEnabled"
                     android:text="Alarm enabled"
                     android:checked="true"
