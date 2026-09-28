@@ -42,6 +42,22 @@ class AlarmSchedulerTest {
     }
 
     @Test
+    fun aRearmWithNoGraceKeepsTodaysAlarm() {
+        // Second review R3: a clock correction (TIME_SET) seconds before the alarm
+        // minute re-arms with grace 0 and must keep today's 07:30, not skip it.
+        val now = at(2026, 9, 28, 7, 29, 30)
+        val next = AlarmScheduler.nextTrigger(7, 30, Prefs.ALL_DAYS_MASK, now, graceSeconds = 0)
+        assertEquals(at(2026, 9, 28, 7, 30).timeInMillis, next.timeInMillis)
+    }
+
+    @Test
+    fun aRearmWithNoGraceStillSkipsAPassedMinute() {
+        val now = at(2026, 9, 28, 7, 30, 5)
+        val next = AlarmScheduler.nextTrigger(7, 30, Prefs.ALL_DAYS_MASK, now, graceSeconds = 0)
+        assertEquals(at(2026, 9, 29, 7, 30).timeInMillis, next.timeInMillis)
+    }
+
+    @Test
     fun skipsUnselectedDays() {
         val now = at(2026, 10, 2, 9, 0) // a Friday, after the alarm time
         val weekdays = mask(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY)
