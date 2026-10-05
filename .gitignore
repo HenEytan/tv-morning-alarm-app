@@ -10,3 +10,7 @@ local.properties
 keystore.properties
 *.jks
 *.keystore
+
+# Claude Code personal config — never committed
+.claude/settings.local.json
+CLAUDE.local.md
