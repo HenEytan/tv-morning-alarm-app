@@ -320,7 +320,18 @@ class MainActivity : AppCompatActivity() {
                 "Android needs a one-time permission to let this app install its own update.",
                 StatusKind.NEUTRAL,
             )
-            allowInstalls.launch(Updater.installPermissionIntent(this))
+            try {
+                allowInstalls.launch(Updater.installPermissionIntent(this))
+            } catch (e: android.content.ActivityNotFoundException) {
+                // A build with no "install unknown apps" screen to send the user to
+                // would otherwise crash the app from the Install tap.
+                setStatus(
+                    binding.statusUpdate,
+                    "This device has no screen for allowing app installs. Allow \"install unknown apps\" " +
+                        "for this app in the system settings, then tap Install again.",
+                    StatusKind.ERROR,
+                )
+            }
             return
         }
         setStatus(binding.statusUpdate, "Installing… the app restarts when it lands.", StatusKind.NEUTRAL)
@@ -426,7 +437,7 @@ class MainActivity : AppCompatActivity() {
                 if (!AlarmScheduler.canScheduleExact(this)) {
                     toast("Grant \"Alarms & reminders\" permission first")
                     setSwitchSilently(false)
-                    startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
+                    openExactAlarmSettings()
                     return@setOnCheckedChangeListener
                 }
                 Prefs.setAlarmEnabled(this, true)
@@ -620,6 +631,10 @@ class MainActivity : AppCompatActivity() {
             when {
                 devices.size == 1 -> proceedWithIp(devices[0].ip)
                 devices.size > 1 -> runOnUiThread {
+                    // The scan takes seconds; Back (or Home on a TV box) may have
+                    // finished this screen meanwhile, and a dialog shown on a
+                    // destroyed activity throws BadTokenException and kills the app.
+                    if (isFinishing || isDestroyed) return@runOnUiThread
                     val labels = devices.map { "${it.name}  (${it.ip})" }.toTypedArray()
                     // Cancelable, with a Cancel button: the dialog used to be neither,
                     // so on a TV remote (Back does nothing to a non-cancelable
@@ -745,7 +760,7 @@ class MainActivity : AppCompatActivity() {
 
         if (!AlarmScheduler.canScheduleExact(this)) {
             toast("Grant \"Alarms & reminders\" permission, then tap Save again")
-            startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
+            openExactAlarmSettings()
             return
         }
 
@@ -814,6 +829,21 @@ class MainActivity : AppCompatActivity() {
                     }
                 )
             }
+        }
+    }
+
+    /**
+     * The "Alarms & reminders" screen (API 31-32 only reach here). Not every
+     * build ships it — TV settings apps in particular are trimmed — and an
+     * unresolved startActivity throws ActivityNotFoundException, which would
+     * take the app down from a Save tap. The toast before this call already says what to
+     * grant, so a missing screen only loses the shortcut.
+     */
+    private fun openExactAlarmSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
+        } catch (e: android.content.ActivityNotFoundException) {
+            DebugLog.log("MainActivity", "no Alarms & reminders screen on this device: ${e.message}")
         }
     }
 

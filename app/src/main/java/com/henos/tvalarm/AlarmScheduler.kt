@@ -33,19 +33,34 @@ object AlarmScheduler {
         graceSeconds: Int = EARLY_FIRE_GUARD_SECONDS,
     ): Calendar {
         val threshold = (now.clone() as Calendar).apply { add(Calendar.SECOND, graceSeconds) }
-        val next = (now.clone() as Calendar).apply {
-            set(Calendar.HOUR_OF_DAY, hour)
-            set(Calendar.MINUTE, minute)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-            if (before(threshold)) add(Calendar.DAY_OF_YEAR, 1)
-        }
+        val next = (now.clone() as Calendar).apply { setClock(hour, minute) }
+        if (next.before(threshold)) next.nextDay(hour, minute)
         var guard = 0
         while (daysMask != 0 && !Prefs.isDaySelected(daysMask, next.get(Calendar.DAY_OF_WEEK)) && guard < 7) {
-            next.add(Calendar.DAY_OF_YEAR, 1)
+            next.nextDay(hour, minute)
             guard++
         }
         return next
+    }
+
+    private fun Calendar.setClock(hour: Int, minute: Int) {
+        set(Calendar.HOUR_OF_DAY, hour)
+        set(Calendar.MINUTE, minute)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+
+    /**
+     * One day on, at [hour]:[minute] again. The clock is set afresh because a
+     * day step carries whatever the calendar resolved on the day it left: a
+     * time in the spring-forward gap (02:30 on the day clocks jump 02:00 →
+     * 03:00) resolves to 03:30, and adding a day to that kept 03:30 for every
+     * later day; stepping INTO the gap day gave 01:30, an hour early, and the
+     * alarm's own re-arm then rang a second time at 03:30.
+     */
+    private fun Calendar.nextDay(hour: Int, minute: Int) {
+        add(Calendar.DAY_OF_YEAR, 1)
+        setClock(hour, minute)
     }
 
     /**
