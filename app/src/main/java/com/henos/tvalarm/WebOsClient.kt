@@ -41,9 +41,9 @@ object WebOsClient {
     var lastPairError: String? = null
         private set
 
-    private data class Endpoint(val url: String, val secure: Boolean)
+    internal data class Endpoint(val url: String, val secure: Boolean)
 
-    private fun endpointsFor(ip: String) = listOf(
+    internal fun endpointsFor(ip: String) = listOf(
         Endpoint("ws://$ip:3000", secure = false),
         Endpoint("wss://$ip:3001", secure = true),
     )
@@ -63,27 +63,49 @@ object WebOsClient {
      * are not blocked, so fan the packet out across every broadcast address the
      * device actually has, plus a unicast to the TV, on both ports WoL listens on.
      */
-    fun sendWol(mac: String, tvIp: String? = null) {
-        val payload = magicPacket(mac)
-        if (payload == null) {
-            DebugLog.log(TAG, "sendWol: FAILED - '$mac' is not a valid MAC address")
+    fun sendWol(mac: String, tvIp: String? = null) = sendWol(parseMacs(mac), tvIp)
+
+    /**
+     * Sends one magic packet per MAC in [macs], to every target address.
+     *
+     * Why a list: an LG TV answers getinfo with BOTH its wired and its Wi-Fi MAC and,
+     * on the UJ630Y at least, without any "connected" state to tell them apart. The
+     * old code picked one (wired first) and the 2026-10-08 log shows what that cost -
+     * a packet addressed to the unplugged Ethernet port, a TV that stayed asleep, and
+     * 90 seconds of EHOSTUNREACH. A magic packet is 102 bytes; sending one to each
+     * interface the TV has ever reported removes the guess entirely.
+     */
+    fun sendWol(macs: List<String>, tvIp: String? = null) {
+        val packets = macs.mapNotNull { mac ->
+            val payload = magicPacket(mac)
+            if (payload == null) DebugLog.log(TAG, "sendWol: skipping '$mac' - not a valid MAC address")
+            payload?.let { mac to it }
+        }
+        if (packets.isEmpty()) {
+            DebugLog.log(TAG, "sendWol: FAILED - no valid MAC address in ${macs}")
             return
         }
         val targets = wolTargets(tvIp)
-        DebugLog.log(TAG, "sendWol: sending magic packet for MAC=$mac to ${targets.joinToString { it.hostAddress ?: it.toString() }}")
+        DebugLog.log(
+            TAG,
+            "sendWol: sending magic packets for MACs=${packets.joinToString { it.first }} " +
+                "to ${targets.joinToString { it.hostAddress ?: it.toString() }}"
+        )
         var delivered = 0
         var lastError: String? = null
         try {
             DatagramSocket().use { socket ->
                 socket.broadcast = true
                 TvNetwork.bind(socket)
-                for (target in targets) {
-                    for (port in intArrayOf(9, 7)) {
-                        try {
-                            socket.send(DatagramPacket(payload, payload.size, target, port))
-                            delivered++
-                        } catch (e: Exception) {
-                            lastError = "${target.hostAddress}:$port ${e.javaClass.simpleName}: ${e.message}"
+                for ((_, payload) in packets) {
+                    for (target in targets) {
+                        for (port in intArrayOf(9, 7)) {
+                            try {
+                                socket.send(DatagramPacket(payload, payload.size, target, port))
+                                delivered++
+                            } catch (e: Exception) {
+                                lastError = "${target.hostAddress}:$port ${e.javaClass.simpleName}: ${e.message}"
+                            }
                         }
                     }
                 }
@@ -91,11 +113,37 @@ object WebOsClient {
         } catch (e: Exception) {
             lastError = "${e.javaClass.simpleName}: ${e.message}"
         }
+        val attempted = packets.size * targets.size * 2
         if (delivered > 0) {
-            DebugLog.log(TAG, "sendWol: packet sent OK ($delivered of ${targets.size * 2} target/port combinations accepted)")
+            DebugLog.log(TAG, "sendWol: packets sent OK ($delivered of $attempted MAC/target/port combinations accepted)")
         } else {
             DebugLog.log(TAG, "sendWol: FAILED - no target accepted the packet (last error: $lastError)")
         }
+    }
+
+    /**
+     * Splits the stored "tv_mac" field, which may hold several addresses separated
+     * by commas, spaces or newlines, into normalised AA:BB:CC:DD:EE:FF strings.
+     * Invalid entries are dropped; duplicates collapse to one.
+     */
+    fun parseMacs(field: String): List<String> =
+        field.split(',', ' ', '\n', ';')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .mapNotNull { normalizeMac(it) }
+            .distinct()
+
+    /** AA:BB:CC:DD:EE:FF (upper-case, colon-separated) or null if [mac] is not 12 hex digits. */
+    fun normalizeMac(mac: String): String? {
+        val hex = mac.replace(":", "").replace("-", "").trim()
+        if (!Regex("^[0-9A-Fa-f]{12}$").matches(hex)) return null
+        return hex.uppercase().chunked(2).joinToString(":")
+    }
+
+    /** True if [field] is empty or every entry in it is a MAC address. */
+    fun isValidMacField(field: String): Boolean {
+        val entries = field.split(',', ' ', '\n', ';').map { it.trim() }.filter { it.isNotEmpty() }
+        return entries.all { normalizeMac(it) != null }
     }
 
     /** 6 bytes of 0xFF followed by the MAC repeated 16 times, or null if [mac] can't be parsed. */
@@ -215,7 +263,7 @@ object WebOsClient {
      * pinning the socket to Wi-Fi costs nothing. Never shut the returned client down:
      * its executor is shared.
      */
-    private fun clientFor(secure: Boolean): OkHttpClient {
+    internal fun clientFor(secure: Boolean): OkHttpClient {
         val base = if (secure) secureClient else plainClient
         val wifi = TvNetwork.socketFactory() ?: return base
         return base.newBuilder().socketFactory(wifi).build()
@@ -227,7 +275,7 @@ object WebOsClient {
      * sockets from a timed-out request ended up logging onFailure minutes later. cancel()
      * actually kills it.
      */
-    private fun release(ws: WebSocket, graceful: Boolean) {
+    internal fun release(ws: WebSocket, graceful: Boolean) {
         if (graceful) ws.close(1000, null) else ws.cancel()
     }
 
@@ -250,7 +298,7 @@ object WebOsClient {
 
     // ---- Pairing manifest -------------------------------------------------
 
-    private fun manifest(): JSONObject {
+    internal fun manifest(): JSONObject {
         val permissions = JSONArray(
             listOf(
                 "LAUNCH", "LAUNCH_WEBAPP", "APP_TO_APP", "CLOSE",
@@ -554,24 +602,32 @@ object WebOsClient {
 
     // ---- MAC address lookup ------------------------------------------------
 
-    /** Blocking. Call from a background thread. Returns the TV's active MAC address, or null. */
-    fun getMacAddress(ip: String, clientKey: String): String? {
+    /**
+     * Blocking. Call from a background thread. Returns every MAC address the TV is
+     * known by - the interface it is connected on first, when the firmware says which -
+     * or an empty list. The ARP table, when Android lets us read it, is the one source
+     * that reports the interface actually in use, so its entry goes to the front.
+     */
+    fun getMacAddresses(ip: String, clientKey: String): List<String> {
         DebugLog.section("GET MAC ADDRESS ip=$ip")
+        val macs = mutableListOf<String>()
         for (endpoint in endpointsFor(ip)) {
-            val mac = getMacOverEndpoint(endpoint, clientKey)
-            if (mac != null) {
-                DebugLog.log(TAG, "getMacAddress: SUCCESS via ${endpoint.url} - mac=$mac")
-                return mac
+            val found = getMacsOverEndpoint(endpoint, clientKey)
+            if (found.isNotEmpty()) {
+                DebugLog.log(TAG, "getMacAddresses: SUCCESS via ${endpoint.url} - macs=$found")
+                macs += found
+                break
             }
         }
-        DebugLog.log(TAG, "getMacAddress: SSAP lookup failed on all endpoints, trying local ARP table")
+        if (macs.isEmpty()) DebugLog.log(TAG, "getMacAddresses: SSAP lookup failed on all endpoints, trying local ARP table")
         val arpMac = getMacFromArpTable(ip)
         if (arpMac != null) {
-            DebugLog.log(TAG, "getMacAddress: SUCCESS via local ARP table - mac=$arpMac")
-            return arpMac
+            DebugLog.log(TAG, "getMacAddresses: ARP table says the TV is reachable at mac=$arpMac")
+            macs.remove(arpMac)
+            macs.add(0, arpMac)
         }
-        DebugLog.log(TAG, "getMacAddress: FAILED over SSAP and ARP table (couldn't determine MAC)")
-        return null
+        if (macs.isEmpty()) DebugLog.log(TAG, "getMacAddresses: FAILED over SSAP and ARP table (couldn't determine MAC)")
+        return macs.distinct()
     }
 
     /**
@@ -603,30 +659,31 @@ object WebOsClient {
 
     /**
      * getinfo splits its answer across two pairs of objects: "wired"/"wifi" carry the
-     * connection state, while "wiredInfo"/"wifiInfo" carry the macAddress. Prefer the
-     * MAC of whichever interface is actually connected - a TV on Ethernet still reports
-     * a Wi-Fi MAC, and a magic packet aimed at the idle interface is simply ignored.
+     * connection state, while "wiredInfo"/"wifiInfo" carry the macAddress. Returns
+     * every MAC found, the connected interface's first when the firmware reports a
+     * state. The UJ630Y reports no state at all, which is why callers must wake
+     * every address in the list rather than trust the order.
      */
-    private fun extractMac(payload: JSONObject): String? {
+    private fun extractMacs(payload: JSONObject): List<String> {
         val wiredMac = macIn(payload.optJSONObject("wiredInfo")) ?: macIn(payload.optJSONObject("wired"))
         val wifiMac = macIn(payload.optJSONObject("wifiInfo")) ?: macIn(payload.optJSONObject("wifi"))
         val wiredConnected = payload.optJSONObject("wired")?.optString("state") == "connected"
         val wifiConnected = payload.optJSONObject("wifi")?.optString("state") == "connected"
-        return when {
-            wiredConnected && wiredMac != null -> wiredMac
-            wifiConnected && wifiMac != null -> wifiMac
-            else -> wiredMac ?: wifiMac
+        val ordered = when {
+            wifiConnected && !wiredConnected -> listOf(wifiMac, wiredMac)
+            else -> listOf(wiredMac, wifiMac)
         }
+        return ordered.filterNotNull().distinct()
     }
 
     private fun macIn(obj: JSONObject?): String? =
         obj?.optString("macAddress")?.takeIf { MAC_PATTERN.matches(it) }?.uppercase()
 
-    private fun getMacOverEndpoint(endpoint: Endpoint, clientKey: String): String? {
-        DebugLog.log(TAG, "getMacOverEndpoint: trying ${endpoint.url}")
+    private fun getMacsOverEndpoint(endpoint: Endpoint, clientKey: String): List<String> {
+        DebugLog.log(TAG, "getMacsOverEndpoint: trying ${endpoint.url}")
         val client = clientFor(endpoint.secure)
         val latch = CountDownLatch(1)
-        var result: String? = null
+        var result: List<String> = emptyList()
         // The method is getinfo, not getStatus. Both getStatus spellings the old code
         // tried came back "404 no such service or method" on every endpoint, which is
         // why this TV never handed over its MAC and Wake-on-LAN had to be typed in by
@@ -685,8 +742,8 @@ object WebOsClient {
                     } else if (type == "response") {
                         val payload = resp.optJSONObject("payload")
                         if (payload != null) {
-                            result = extractMac(payload)
-                            if (result == null) {
+                            result = extractMacs(payload)
+                            if (result.isEmpty()) {
                                 DebugLog.log(TAG, "${endpoint.url}: ${uris[uriIndex]} response carried no usable macAddress")
                             }
                         }
@@ -708,10 +765,10 @@ object WebOsClient {
             })
         } catch (e: Exception) {
             DebugLog.log(TAG, "${endpoint.url}: exception opening socket - ${e.javaClass.simpleName}: ${e.message}")
-            return null
+            return emptyList()
         }
         val completed = latch.await(15, TimeUnit.SECONDS)
-        if (!completed) DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for getStatus response")
+        if (!completed) DebugLog.log(TAG, "${endpoint.url}: TIMEOUT waiting for getinfo response")
         release(ws, graceful = completed)
         return result
     }

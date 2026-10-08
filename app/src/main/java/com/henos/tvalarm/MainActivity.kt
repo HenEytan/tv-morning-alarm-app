@@ -18,6 +18,7 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.method.ScrollingMovementMethod
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -35,6 +36,11 @@ import java.util.Locale
 import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
+
+    private companion object {
+        /** How long to wait before trying the live-volume socket again while the TV is off. */
+        const val LIVE_VOLUME_RETRY_MS = 15_000L
+    }
 
     // --- Backup & updates -------------------------------------------------
     // Registered as fields: an ActivityResultLauncher must be created before the
@@ -78,6 +84,16 @@ class MainActivity : AppCompatActivity() {
             countdownHandler.postDelayed(this, 30_000)
         }
     }
+
+    // --- Live TV volume ----------------------------------------------------
+    // One registered socket to the TV for as long as this screen is showing. Null
+    // while the TV is off or unreachable; retried every LIVE_VOLUME_RETRY_MS so the
+    // controls come alive by themselves once the TV is on.
+    private var volumeSession: TvVolumeSession? = null
+    private var liveVolume: Int = -1
+    private var liveMuted = false
+    private var draggingTvVolume = false
+    private val liveVolumeRetry = Runnable { startLiveVolume() }
 
     /** Maps each day chip to its java.util.Calendar.DAY_OF_WEEK constant. */
     private val dayChips: List<Pair<Chip, Int>> by lazy {
@@ -306,6 +322,8 @@ class MainActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
         })
 
+        setupLiveVolumeControls()
+
         binding.switchAlarmEnabled.isChecked = Prefs.isAlarmEnabled(this)
         binding.switchAlarmEnabled.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
@@ -385,12 +403,108 @@ class MainActivity : AppCompatActivity() {
             refreshAllStatuses()
             countdownHandler.removeCallbacks(countdownTicker)
             countdownHandler.post(countdownTicker)
+            startLiveVolume()
         }
     }
 
     override fun onPause() {
         super.onPause()
         countdownHandler.removeCallbacks(countdownTicker)
+        stopLiveVolume()
+    }
+
+    // --- Live TV volume ----------------------------------------------------
+
+    private fun setupLiveVolumeControls() {
+        binding.seekTvVolume.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                liveVolume = progress
+                renderLiveVolume()
+                // The session coalesces these: at most one setVolume in flight, newest wins.
+                volumeSession?.setVolume(progress)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) { draggingTvVolume = true }
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                draggingTvVolume = false
+                volumeSession?.setVolume(seekBar?.progress ?: return)
+            }
+        })
+        binding.btnTvVolumeDown.setOnClickListener { volumeSession?.volumeDown() }
+        binding.btnTvVolumeUp.setOnClickListener { volumeSession?.volumeUp() }
+        binding.btnTvMute.setOnClickListener { volumeSession?.setMute(!liveMuted) }
+        setLiveVolumeEnabled(false)
+        binding.labelTvVolume.text = "TV volume now: connecting\u2026"
+    }
+
+    private fun startLiveVolume() {
+        countdownHandler.removeCallbacks(liveVolumeRetry)
+        if (volumeSession?.isConnected == true) return
+        volumeSession?.close()
+        volumeSession = null
+        val ip = currentIp()
+        val key = Prefs.clientKey(this)
+        if (ip.isBlank() || key == null) {
+            binding.labelTvVolume.text = "TV volume now: connect to the TV first"
+            setLiveVolumeEnabled(false)
+            return
+        }
+        binding.labelTvVolume.text = "TV volume now: connecting\u2026"
+        val session = TvVolumeSession(ip, key, object : TvVolumeSession.Listener {
+            override fun onConnected(session: TvVolumeSession) = runOnUiThread {
+                if (volumeSession !== session) return@runOnUiThread
+                setLiveVolumeEnabled(true)
+                binding.labelTvVolume.text = "TV volume now: \u2026"
+            }
+            override fun onVolume(session: TvVolumeSession, volume: Int, muted: Boolean) = runOnUiThread {
+                if (volumeSession !== session) return@runOnUiThread
+                liveVolume = volume
+                liveMuted = muted
+                if (!draggingTvVolume) binding.seekTvVolume.progress = volume
+                renderLiveVolume()
+            }
+            override fun onDisconnected(session: TvVolumeSession, reason: String, unpaired: Boolean) = runOnUiThread {
+                if (volumeSession !== session) return@runOnUiThread
+                volumeSession = null
+                setLiveVolumeEnabled(false)
+                if (unpaired) {
+                    binding.labelTvVolume.text = "TV volume now: TV no longer recognizes this app \u2014 tap Connect to TV"
+                } else {
+                    binding.labelTvVolume.text = "TV volume now: TV is off or unreachable"
+                    countdownHandler.postDelayed(liveVolumeRetry, LIVE_VOLUME_RETRY_MS)
+                }
+            }
+        })
+        volumeSession = session
+        session.open()
+    }
+
+    private fun stopLiveVolume() {
+        countdownHandler.removeCallbacks(liveVolumeRetry)
+        volumeSession?.close()
+        volumeSession = null
+        setLiveVolumeEnabled(false)
+    }
+
+    /** Reconnects after something that changes the TV's state: a run, a turn-off, a re-pair. */
+    private fun restartLiveVolume() {
+        stopLiveVolume()
+        countdownHandler.postDelayed(liveVolumeRetry, 2_000)
+    }
+
+    private fun setLiveVolumeEnabled(enabled: Boolean) {
+        binding.seekTvVolume.isEnabled = enabled
+        binding.btnTvVolumeDown.isEnabled = enabled
+        binding.btnTvVolumeUp.isEnabled = enabled
+        binding.btnTvMute.isEnabled = enabled
+        binding.seekTvVolume.alpha = if (enabled) 1f else 0.4f
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun renderLiveVolume() {
+        if (liveVolume < 0) return
+        binding.labelTvVolume.text = if (liveMuted) "TV volume now: muted ($liveVolume)" else "TV volume now: $liveVolume"
+        binding.btnTvMute.text = if (liveMuted) "Unmute" else "Mute"
     }
 
     private fun currentDaysMask(): Int {
@@ -443,7 +557,12 @@ class MainActivity : AppCompatActivity() {
         when {
             lastRunAt == 0L -> setStatus(binding.statusRun, "Not run yet", StatusKind.NEUTRAL)
             lastRunStatus == "success" -> setStatus(binding.statusRun, "\u2713 Last run succeeded \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.SUCCESS)
-            lastRunStatus == "unreachable" -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 TV unreachable (${timeFmt.format(Date(lastRunAt))})", StatusKind.ERROR)
+            lastRunStatus == "unreachable" -> setStatus(
+                binding.statusRun,
+                "\u2717 Last run failed \u2014 TV unreachable (${timeFmt.format(Date(lastRunAt))}). " +
+                    "If the TV was off, it must allow network wake-up: on the TV, Settings \u2192 General \u2192 Mobile TV On \u2192 Turn on via Wi-Fi.",
+                StatusKind.ERROR
+            )
             lastRunStatus == "unpaired" -> setStatus(binding.statusRun, "\u2717 TV no longer recognizes this app \u2014 tap Connect to TV again (${timeFmt.format(Date(lastRunAt))})", StatusKind.ERROR)
             else -> setStatus(binding.statusRun, "\u2717 Last run failed \u2014 ${timeFmt.format(Date(lastRunAt))}", StatusKind.ERROR)
         }
@@ -544,13 +663,19 @@ class MainActivity : AppCompatActivity() {
                 Prefs.saveClientKey(this, key)
                 // Ask the TV for its own MAC first; if the firmware doesn't expose that,
                 // WebOsClient falls back to reading it from the local ARP table.
-                val mac = WebOsClient.getMacAddress(ip, key)
+                val macs = WebOsClient.getMacAddresses(ip, key)
                 runOnUiThread {
                     binding.btnConnect.isEnabled = true
                     binding.btnConnect.text = "Reconnect"
-                    if (mac != null) {
-                        binding.inputTvMac.setText(mac)
-                        toast("Connected \u2014 ready to go, Wake-on-LAN is set up")
+                    if (macs.isNotEmpty()) {
+                        // Keep every address: the TV does not say which port it is on,
+                        // so the alarm wakes all of them.
+                        binding.inputTvMac.setText(macs.joinToString(", "))
+                        toast(
+                            if (macs.size > 1) "Connected \u2014 Wake-on-LAN set up for both of the TV's network ports"
+                            else "Connected \u2014 ready to go, Wake-on-LAN is set up"
+                        )
+                        restartLiveVolume()
                     } else {
                         toast("Connected, but this TV won't hand over its MAC automatically \u2014 open Advanced and enter it manually (find it in the TV's own Settings \u2192 Network menu) for Wake-on-LAN to work")
                     }
@@ -580,9 +705,8 @@ class MainActivity : AppCompatActivity() {
         return if (match != null) "spotify:playlist:${match.groupValues[1]}" else trimmed
     }
 
-    /** Accepts 12 hex digits, with or without : or - separators every 2 chars. */
-    private fun isValidMac(mac: String): Boolean =
-        Regex("^([0-9A-Fa-f]{2}[:-]?){5}[0-9A-Fa-f]{2}$").matches(mac)
+    /** One or more MACs (12 hex digits each, : or - optional) separated by commas or spaces. */
+    private fun isValidMac(mac: String): Boolean = WebOsClient.isValidMacField(mac)
 
     private fun doSaveAndSchedule() {
         DebugLog.section("USER TAPPED: Save + Schedule Alarm")
@@ -600,7 +724,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (mac.isNotBlank() && !isValidMac(mac)) {
-            toast("That MAC address doesn't look right \u2014 should be 12 hex characters, e.g. AA:BB:CC:DD:EE:FF")
+            toast("That MAC address doesn't look right \u2014 each should be 12 hex characters, e.g. AA:BB:CC:DD:EE:FF, several separated by commas")
             return
         }
         if (Prefs.clientKey(this) == null) {
@@ -672,6 +796,7 @@ class MainActivity : AppCompatActivity() {
             val r = WebOsClient.turnOffTv(ip, clientKey)
             runOnUiThread {
                 binding.btnTurnOff.isEnabled = true
+                if (r == WebOsClient.RequestResult.OK) restartLiveVolume()
                 toast(
                     when (r) {
                         WebOsClient.RequestResult.OK -> "TV turning off"
@@ -708,7 +833,7 @@ class MainActivity : AppCompatActivity() {
         }
         val mac = binding.inputTvMac.text.toString().trim()
         if (mac.isNotBlank() && !isValidMac(mac)) {
-            toast("That MAC address doesn't look right \u2014 should be 12 hex characters, e.g. AA:BB:CC:DD:EE:FF")
+            toast("That MAC address doesn't look right \u2014 each should be 12 hex characters, e.g. AA:BB:CC:DD:EE:FF, several separated by commas")
             return
         }
         val playlist = normalizePlaylistUri(binding.inputPlaylistUri.text.toString())
@@ -740,6 +865,7 @@ class MainActivity : AppCompatActivity() {
             if (info != null && info.state.isFinished) {
                 binding.btnRunNow.isEnabled = true
                 refreshAllStatuses()
+                restartLiveVolume()
             }
         }
         toast("Running now \u2014 TV should wake shortly")

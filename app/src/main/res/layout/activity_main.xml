@@ -82,7 +82,7 @@
                     android:layout_height="wrap_content">
 
                     <TextView
-                        android:text="Filled in automatically when Connect finds your TV. Only edit these if scanning doesn't find it, or to set the MAC manually for Wake-on-LAN."
+                        android:text="Filled in automatically when Connect finds your TV. Only edit these if scanning doesn't find it, or to set the MAC manually for Wake-on-LAN. The TV may have two MAC addresses (wired and Wi-Fi); list both, separated by a comma, and the alarm wakes whichever is plugged in."
                         android:textSize="12sp"
                         android:textColor="@color/text_secondary"
                         android:layout_marginTop="4dp"
@@ -283,6 +283,71 @@
                     android:layout_gravity="center_horizontal"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content" />
+
+                <TextView
+                    android:id="@+id/labelTvVolume"
+                    android:text="TV volume now: connecting\u2026"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="2dp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+
+                <LinearLayout
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnTvVolumeDown"
+                        android:text="\u2212"
+                        android:textSize="20sp"
+                        android:minWidth="44dp"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:contentDescription="TV volume down"
+                        style="@style/TextButtonMuted"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
+                    <SeekBar
+                        android:id="@+id/seekTvVolume"
+                        android:max="100"
+                        android:progress="0"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnTvVolumeUp"
+                        android:text="+"
+                        android:textSize="20sp"
+                        android:minWidth="44dp"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:contentDescription="TV volume up"
+                        style="@style/TextButtonMuted"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnTvMute"
+                        android:text="Mute"
+                        android:minWidth="0dp"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        style="@style/TextButtonMuted"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnStop"

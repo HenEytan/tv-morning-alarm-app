@@ -14,7 +14,11 @@ object Prefs {
     fun get(context: Context) = context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
     fun tvIp(context: Context) = get(context).getString("tv_ip", "") ?: ""
+    /** The raw MAC field: one address, or several separated by commas (see [tvMacs]). */
     fun tvMac(context: Context) = get(context).getString("tv_mac", "") ?: ""
+
+    /** Every MAC the TV is known by. Wake-on-LAN goes to all of them. */
+    fun tvMacs(context: Context): List<String> = WebOsClient.parseMacs(tvMac(context))
     fun playlistUri(context: Context) = get(context).getString("playlist_uri", "") ?: ""
     fun spotifyAppId(context: Context) = get(context).getString("spotify_app_id", "spotify-beehive") ?: "spotify-beehive"
     fun clientKey(context: Context) = get(context).getString("client_key", null)

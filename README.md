@@ -11,9 +11,15 @@ phone.
 1. Connects to your LG webOS TV over the local network (LG's SSAP remote
    protocol) and pairs with it.
 2. On a schedule you set, wakes the TV (Wake-on-LAN, if a MAC address is
-   available) and waits for it to come online.
+   available) and waits for it to come online. LG TVs report both a wired
+   and a Wi-Fi MAC without saying which one is in use, so the app keeps both
+   and sends the wake packet to each. For a TV that is fully off, the TV
+   itself must allow network wake-up: Settings → General → Mobile TV On →
+   Turn on via Wi-Fi (and Quick Start+ where offered).
 3. Launches the Spotify app on the TV and starts your chosen playlist,
    at a wake-up volume you set.
+4. While the app is open and the TV is on, a live volume slider (with mute
+   and step buttons) controls the TV directly and follows the remote.
 
 ## Backup and updates
 
