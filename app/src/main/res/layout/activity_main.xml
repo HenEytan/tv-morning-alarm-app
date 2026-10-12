@@ -85,7 +85,7 @@
                     android:layout_height="wrap_content">
 
                     <TextView
-                        android:text="Filled in automatically when Connect finds your TV. Only edit these if scanning doesn't find it, or to set the MAC manually for Wake-on-LAN."
+                        android:text="Filled in automatically when Connect finds your TV. Only edit these if scanning doesn't find it, or to set the MAC manually for Wake-on-LAN. The TV may have two MAC addresses (wired and Wi-Fi); list both, separated by a comma, and the alarm wakes whichever is plugged in."
                         android:textSize="@dimen/text_caption"
                         android:textColor="@color/text_secondary"
                         android:layout_marginTop="4dp"

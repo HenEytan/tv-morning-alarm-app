@@ -688,13 +688,18 @@ class MainActivity : AppCompatActivity() {
                 Prefs.saveClientKey(this, key)
                 // Ask the TV for its own MAC first; if the firmware doesn't expose that,
                 // WebOsClient falls back to reading it from the local ARP table.
-                val mac = WebOsClient.getMacAddress(ip, key)
+                val macs = WebOsClient.getMacAddresses(ip, key)
                 runOnUiThread {
                     binding.btnConnect.isEnabled = true
                     binding.btnConnect.text = "Reconnect"
-                    if (mac != null) {
-                        binding.inputTvMac.setText(mac)
-                        toast("Connected \u2014 ready to go, Wake-on-LAN is set up")
+                    if (macs.isNotEmpty()) {
+                        // Keep every address: the TV does not say which port it is on,
+                        // so the alarm wakes all of them.
+                        binding.inputTvMac.setText(macs.joinToString(", "))
+                        toast(
+                            if (macs.size > 1) "Connected \u2014 Wake-on-LAN set up for both of the TV's network ports"
+                            else "Connected \u2014 ready to go, Wake-on-LAN is set up"
+                        )
                     } else {
                         toast("Connected, but this TV won't hand over its MAC automatically \u2014 open Advanced and enter it manually (find it in the TV's own Settings \u2192 Network menu) for Wake-on-LAN to work")
                     }
@@ -724,9 +729,8 @@ class MainActivity : AppCompatActivity() {
         return if (match != null) "spotify:playlist:${match.groupValues[1]}" else trimmed
     }
 
-    /** Accepts 12 hex digits, with or without : or - separators every 2 chars. */
-    private fun isValidMac(mac: String): Boolean =
-        Regex("^([0-9A-Fa-f]{2}[:-]?){5}[0-9A-Fa-f]{2}$").matches(mac)
+    /** One or more MACs (12 hex digits each, : or - optional) separated by commas or spaces. */
+    private fun isValidMac(mac: String): Boolean = WebOsClient.isValidMacField(mac)
 
     private fun doSaveAndSchedule() {
         DebugLog.section("USER TAPPED: Save + Schedule Alarm")
@@ -744,7 +748,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (mac.isNotBlank() && !isValidMac(mac)) {
-            toast("That MAC address doesn't look right \u2014 should be 12 hex characters, e.g. AA:BB:CC:DD:EE:FF")
+            toast("That MAC address doesn't look right \u2014 each should be 12 hex characters, e.g. AA:BB:CC:DD:EE:FF, several separated by commas")
             return
         }
         if (Prefs.clientKey(this) == null) {
@@ -871,7 +875,7 @@ class MainActivity : AppCompatActivity() {
         }
         val mac = binding.inputTvMac.text.toString().trim()
         if (mac.isNotBlank() && !isValidMac(mac)) {
-            toast("That MAC address doesn't look right \u2014 should be 12 hex characters, e.g. AA:BB:CC:DD:EE:FF")
+            toast("That MAC address doesn't look right \u2014 each should be 12 hex characters, e.g. AA:BB:CC:DD:EE:FF, several separated by commas")
             return
         }
         val playlist = normalizePlaylistUri(binding.inputPlaylistUri.text.toString())

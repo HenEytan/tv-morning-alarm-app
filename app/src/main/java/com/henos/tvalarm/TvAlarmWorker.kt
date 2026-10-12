@@ -87,8 +87,11 @@ class TvAlarmWorker(context: Context, params: WorkerParameters) : Worker(context
             return Result.failure()
         }
 
-        if (mac.isNotBlank()) {
-            WebOsClient.sendWol(mac, ip)
+        val macs = WebOsClient.parseMacs(mac)
+        if (macs.isNotEmpty()) {
+            // Every address the TV has ever reported: LG firmware hands over both the
+            // wired and the Wi-Fi MAC with no hint which one is plugged in.
+            WebOsClient.sendWol(macs, ip)
         } else {
             DebugLog.log("TvAlarmWorker", "no MAC configured - skipping Wake-on-LAN (only works if the TV is already on)")
         }
