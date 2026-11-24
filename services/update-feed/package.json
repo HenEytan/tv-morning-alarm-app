@@ -1,0 +1,12 @@
+{
+  "name": "tv-morning-alarm-update-feed",
+  "private": true,
+  "type": "module",
+  "description": "TV Morning Alarm's update feed: the GitHub releases API subset the in-app updater reads, proxied with a server-side token",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "dev": "npx --yes wrangler@4 dev",
+    "deploy": "npx --yes wrangler@4 deploy"
+  }
+}

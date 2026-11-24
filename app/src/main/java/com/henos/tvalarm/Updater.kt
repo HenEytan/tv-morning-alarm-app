@@ -21,9 +21,12 @@ import java.util.Locale
  * Updating the app in place, so a new build is never "uninstall, download,
  * install".
  *
- * The repository is PUBLIC, which is what makes this simple: the phone reads
- * `releases/latest` from GitHub directly. There is no server, no token, and
- * nothing to configure.
+ * The phone reads `releases/latest` from the tv-morning-alarm-updates
+ * Cloudflare Worker (services/update-feed), which proxies GitHub with a
+ * server-side read token and answers in GitHub's own shape, so the APK holds no
+ * credential and keeps updating once the repository is private. While the
+ * repository is still public, GitHub itself is the fallback when the Worker
+ * does not answer.
  *
  * THE VERSION COMPARISON is the CI run number, and that is not a coincidence:
  * `app/build.gradle` sets `versionCode` from `BUILD_NUMBER`, which the workflow
@@ -43,8 +46,12 @@ import java.util.Locale
  */
 object Updater {
 
-    /** Where the release feed lives. Public, so no credential is involved. */
+    /** The repository whose releases are the feed. */
     const val REPO = "HenEytan/tv-morning-alarm-app"
+
+    /** The update-feed Worker: GitHub-shaped routes, the token stays on the server. */
+    const val FEED_ORIGIN = "https://tv-morning-alarm-updates.peakbeat-cloud-library.workers.dev"
+    private const val GITHUB_API = "https://api.github.com"
 
     /** The app asks at most this often on its own. */
     const val CHECK_EVERY_MS = 24L * 60 * 60 * 1000
@@ -104,20 +111,31 @@ object Updater {
         null
     }
 
+    /**
+     * Where `releases/latest` is asked, in order: the Worker first, then GitHub
+     * directly, which answers only while the repository is public.
+     */
+    fun latestReleaseUrls(): List<String> =
+        listOf(FEED_ORIGIN, GITHUB_API).map { "$it/repos/$REPO/releases/latest" }
+
+    /** The first body [fetch] returns for [urls], asked in order; null when none answers. */
+    fun firstAnswer(urls: List<String>, fetch: (String) -> String?): String? =
+        urls.asSequence().mapNotNull(fetch).firstOrNull()
+
     /** Is a check due? A clock that went backwards answers true. */
     fun checkDue(lastMs: Long, nowMs: Long, everyMs: Long = CHECK_EVERY_MS): Boolean =
         lastMs <= 0L || nowMs < lastMs || nowMs - lastMs >= everyMs
 
     /**
-     * Ask GitHub. Blocking — call it off the main thread. Never throws: an
+     * Ask the feed. Blocking — call it off the main thread. Never throws: an
      * update check that breaks the app is a far worse bug than one that
      * quietly fails.
      */
     fun check(context: Context, force: Boolean = false, nowMs: Long = System.currentTimeMillis()): Check {
         val prefs = Prefs.get(context)
         if (!force && !checkDue(prefs.getLong(LAST_CHECK_KEY, 0L), nowMs)) return Check.UpToDate
-        val body = get("https://api.github.com/repos/$REPO/releases/latest") ?: return Check.Failed("offline")
-        // Stamped only once GitHub answered: a check that failed (offline at
+        val body = firstAnswer(latestReleaseUrls(), ::get) ?: return Check.Failed("offline")
+        // Stamped only once a feed answered: a check that failed (offline at
         // launch) must not silence the next 24 hours of checks.
         prefs.edit().putLong(LAST_CHECK_KEY, nowMs).apply()
         val release = parseRelease(body) ?: return Check.Failed("unreadable")

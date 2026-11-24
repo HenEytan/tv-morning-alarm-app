@@ -249,7 +249,7 @@ class MainActivity : AppCompatActivity() {
                     is Updater.Check.UpToDate ->
                         if (force) setStatus(binding.statusUpdate, "You're on the latest build.", StatusKind.SUCCESS)
                     is Updater.Check.Failed ->
-                        if (force) setStatus(binding.statusUpdate, "Couldn't reach GitHub to check.", StatusKind.NEUTRAL)
+                        if (force) setStatus(binding.statusUpdate, "Couldn't reach the update server to check.", StatusKind.NEUTRAL)
                     is Updater.Check.Available -> {
                         setStatus(
                             binding.statusUpdate,
