@@ -48,4 +48,29 @@ class UpdaterTest {
         assertFalse(Updater.checkDue(10L, 10L + Updater.CHECK_EVERY_MS - 1))
         assertTrue(Updater.checkDue(10L, 10L + Updater.CHECK_EVERY_MS))
     }
+
+    @Test
+    fun theWorkerFeedIsAskedFirstThenGithub() {
+        assertEquals(
+            listOf(
+                "https://tv-morning-alarm-updates.peakbeat-cloud-library.workers.dev/repos/HenEytan/tv-morning-alarm-app/releases/latest",
+                "https://api.github.com/repos/HenEytan/tv-morning-alarm-app/releases/latest",
+            ),
+            Updater.latestReleaseUrls(),
+        )
+    }
+
+    @Test
+    fun firstFeedThatAnswersWins() {
+        val asked = mutableListOf<String>()
+        val body = Updater.firstAnswer(listOf("a", "b", "c")) { url -> asked += url; if (url == "a") null else "body-$url" }
+        assertEquals("body-b", body)
+        assertEquals(listOf("a", "b"), asked)
+    }
+
+    @Test
+    fun noFeedAnsweringIsNull() {
+        assertNull(Updater.firstAnswer(listOf("a", "b")) { null })
+        assertNull(Updater.firstAnswer(emptyList()) { "never" })
+    }
 }

@@ -35,7 +35,9 @@ The TV **pairing key is never in a backup**. It is a credential for your
 television and a backup file travels; you pair again after restoring, which is
 one prompt on the TV screen.
 
-**The app updates itself.** It asks GitHub once a day whether a newer build
+**The app updates itself.** Once a day it asks the project's update server
+(a small Cloudflare Worker that reads this repo's GitHub releases; see
+[docs/guides/update-feed.md](docs/guides/update-feed.md)) whether a newer build
 exists and downloads it; the install waits for a tap on **Install build N** and
 goes over the running app — no uninstall, settings kept. Android asks once for
 permission to let the app install its own updates.

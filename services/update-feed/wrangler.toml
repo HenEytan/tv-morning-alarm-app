@@ -1,0 +1,15 @@
+# TV Morning Alarm's update feed (docs/guides/update-feed.md). The app reads releases/latest from
+# here first, so it keeps updating once the repository is private. Free plan, no bindings: the
+# Worker proxies GitHub with the TVALARM_GITHUB_TOKEN secret (or GITHUB_TOKEN), the shared
+# Contents-read key the other Peak feeds use. Deploy: `npm run deploy` here.
+name = "tv-morning-alarm-updates"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+[observability]
+enabled = true
+
+[vars]
+# The only owner/name the GitHub-shaped routes answer for (Updater.REPO in the app).
+REPO = "HenEytan/tv-morning-alarm-app"

@@ -6,7 +6,7 @@ one-line `CLAUDE.md` beside it.
 
 ## What this repo is
 
-TV Morning Alarm: an Android app, sideloaded onto a phone or an Android TV box, that on a schedule wakes an LG webOS TV (Wake-on-LAN), pairs with it over LG's SSAP WebSocket protocol, sets a wake-up volume and starts a Spotify playlist on the TV. It is a personal DIY tool for whoever runs it on their own home network; installed copies update themselves from this repo's GitHub releases. The thing a newcomer gets wrong: **a merge to `main` publishes a release that every installed device downloads and installs** — see [Release and updates](#release-and-updates).
+TV Morning Alarm: an Android app, sideloaded onto a phone or an Android TV box, that on a schedule wakes an LG webOS TV (Wake-on-LAN), pairs with it over LG's SSAP WebSocket protocol, sets a wake-up volume and starts a Spotify playlist on the TV. It is a personal DIY tool for whoever runs it on their own home network; installed copies update themselves from this repo's GitHub releases, read through the `tv-morning-alarm-updates` Cloudflare Worker. The thing a newcomer gets wrong: **a merge to `main` publishes a release that every installed device downloads and installs** — see [Release and updates](#release-and-updates).
 
 ## Layout
 
@@ -14,6 +14,7 @@ TV Morning Alarm: an Android app, sideloaded onto a phone or an Android TV box, 
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
 | [app/src/main/java/com/henos/tvalarm/](app/src/main/java/com/henos/tvalarm/) | The whole app, one package: UI (`MainActivity`), scheduling (`AlarmScheduler`, receivers, `TvAlarmWorker`), TV protocol (`WebOsClient`, `SsdpDiscovery`, `TvNetwork`), settings (`Prefs`, `Backup`), self-update (`Updater`, `UpdateReceiver`), `DebugLog` | AndroidX core/appcompat, Material, WorkManager, OkHttp |
 | [app/src/test/java/com/henos/tvalarm/](app/src/test/java/com/henos/tvalarm/) | Pure-JVM unit tests (JUnit 4; the real `org.json` on the test classpath, since `android.jar` only stubs it)                               | JUnit, org.json                                       |
+| [services/update-feed/](services/update-feed/)                           | The update-feed Cloudflare Worker: GitHub-shaped `releases/latest` and asset routes, proxied with a server-side token ([guide](docs/guides/update-feed.md)) | Wrangler 4, Node test runner                          |
 | [.github/workflows/build-apk.yml](.github/workflows/build-apk.yml)       | CI: unit tests and lint gate, then builds the APK; on `main` it release-signs and publishes `build-N`                                      | —                                                     |
 | [docs/audit/](docs/audit/)                                               | Dated audit and review reports                                                                                                             | —                                                     |
 
@@ -21,7 +22,7 @@ _[FILL IN: the boundary rule between them — what may import what, and where a 
 
 ## Public contracts
 
-- **The release channel the in-app updater reads**: `Updater.kt` fetches GitHub `releases/latest` for `HenEytan/tv-morning-alarm-app` and reads the number from a tag matching `build-<N>`; that `N` is the CI run number (plus `VERSION_CODE_OFFSET` in the workflow), which `app/build.gradle` also stamps as `versionCode`. The tag format, the repo name and the `versionCode` scheme move together or devices stop updating.
+- **The release channel the in-app updater reads**: `Updater.kt` fetches `releases/latest` for `HenEytan/tv-morning-alarm-app` from the update-feed Worker (`Updater.FEED_ORIGIN`, [services/update-feed/](services/update-feed/)), falling back to `api.github.com` while the repository is public, and reads the number from a tag matching `build-<N>`; that `N` is the CI run number (plus `VERSION_CODE_OFFSET` in the workflow), which `app/build.gradle` also stamps as `versionCode`. The tag format, the repo name, the Worker's URL and routes, and the `versionCode` scheme move together or devices stop updating; once the repository is private, a device whose build predates the Worker can no longer update.
 - **The signing identity**: `applicationId` `com.henos.tvalarm` and the release keystore's certificate. Android replaces an install only for the same package and the same certificate; changing either strands every installed device.
 - **The settings backup file format** (`Backup.kt`, `VERSION`, `APP` = `tv-morning-alarm`): files saved by older builds must still restore.
 - **The stored preferences** (`Prefs.kt`, file `tvalarm_prefs`, its keys and defaults): live on installed devices across updates; renaming a key silently loses a setting.
@@ -63,6 +64,7 @@ The Gradle wrapper is committed; a local build needs the Android SDK (CI uses JD
 - Only release-signed builds may ever be published: a debug build is signed with a key the runner generates for itself, so installed devices download it, refuse it, and then see no further updates.
 - CI signs with the secrets `ANDROID_KEYSTORE_B64` (`base64 -w0 release.jks`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Keep the keystore: losing it means no future build can update an existing install — everyone has to uninstall first.
 - Renaming or recreating the workflow resets the run counter, and every later build would look older than what is installed. The publishing run checks its number against the latest release and stops; recovery is setting `VERSION_CODE_OFFSET` in [build-apk.yml](.github/workflows/build-apk.yml) to the last published number.
+- Installed apps read releases through the update-feed Worker, which proxies GitHub with its `TVALARM_GITHUB_TOKEN` secret; see [docs/guides/update-feed.md](docs/guides/update-feed.md). `npm test` in `services/update-feed` covers it.
 - `v1.0.0` is an old tag the updater does not read; the newest `build-N` is the latest release.
 - A local build is versioned `1.0 (dev)` with versionCode 1, so it sees every published build as newer and then refuses to install it (different key). To put a published build over a local one, uninstall first — save the settings to a file before.
 
